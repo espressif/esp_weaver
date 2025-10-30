@@ -1,0 +1,26 @@
+---
+# yamllint configuration for ESP-Weaver
+# Relaxed rules for CI configuration files
+
+extends: default
+
+rules:
+  # Trailing spaces should always be removed
+  trailing-spaces: enable
+
+  # Line length: relaxed for CI files with long commands
+  line-length:
+    max: 120
+    level: warning
+
+  # Document start: warning only (not all YAML files need ---)
+  document-start:
+    level: warning
+
+  # Comments indentation: allow flexibility
+  comments-indentation: disable
+
+  # Truthy values: allow 'yes', 'no', 'on', 'off' in CI files
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+

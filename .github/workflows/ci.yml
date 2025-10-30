@@ -1,0 +1,241 @@
+---
+# GitHub Actions CI/CD Configuration for esp_weaver
+# Home Assistant Custom Integration - Official Standards Compliant
+# Reference: https://developers.home-assistant.io/docs/creating_integration_manifest
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  # ===========================================================================
+  # Validation Jobs
+  # ===========================================================================
+
+  hacs-validate:
+    name: HACS Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: HACS Validation
+        uses: hacs/action@v1
+        with:
+          category: integration
+
+  hassfest-validate:
+    name: Hassfest Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Hassfest Validation
+        uses: home-assistant/actions/hassfest@v1
+
+  # ===========================================================================
+  # Lint Jobs
+  # ===========================================================================
+
+  ruff-lint:
+    name: Ruff Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: Ruff check
+        run: ruff check custom_components/esp_weaver tests
+
+  ruff-format:
+    name: Ruff Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: Ruff format check
+        run: ruff format --check custom_components/esp_weaver tests
+
+  codespell:
+    name: Codespell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install codespell
+        run: pip install codespell==2.3.0
+
+      - name: Run codespell
+        run: |
+          codespell custom_components tests *.md \
+            --ignore-words-list=hass,caf \
+            --skip="*.json,*.ambr,*.pyc,htmlcov/*,__pycache__/*,*.egg-info/*" \
+            --quiet-level=2
+
+  mypy:
+    name: Mypy Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_test.txt
+
+      - name: Run mypy
+        run: mypy custom_components/esp_weaver --config-file=pyproject.toml
+
+  pylint:
+    name: Pylint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_test.txt
+          pip install pylint==3.3.2
+
+      # Note: pylint==3.3.2 (released Nov 2024) - stable release, no known security issues
+      - name: Run pylint
+        run: pylint custom_components/esp_weaver --rcfile=pyproject.toml
+
+  # ===========================================================================
+  # Test Jobs
+  # ===========================================================================
+
+  pytest:
+    name: Pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_test.txt
+
+      - name: Run pytest with coverage
+        run: |
+          pytest tests/ \
+            --cov=custom_components/esp_weaver \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov-report=html:htmlcov \
+            --cov-fail-under=95 \
+            --junitxml=report.xml \
+            --durations=10 \
+            -v
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          file: coverage.xml
+          fail_ci_if_error: false
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: |
+            coverage.xml
+            htmlcov/
+            report.xml
+          retention-days: 30
+
+  pytest-config-flow:
+    name: Config Flow 100% Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_test.txt
+
+      - name: Run config flow tests with 100% coverage
+        run: |
+          pytest tests/ -k config_flow \
+            --cov=custom_components.esp_weaver.config_flow \
+            --cov-report=term-missing \
+            --cov-fail-under=100 \
+            -v
+
+  # ===========================================================================
+  # Quality Gate
+  # ===========================================================================
+
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    needs:
+      - hacs-validate
+      - hassfest-validate
+      - ruff-lint
+      - ruff-format
+      - codespell
+      - mypy
+      - pylint
+      - pytest
+      - pytest-config-flow
+    steps:
+      - name: All checks passed
+        run: |
+          echo "✅ All mandatory quality checks passed!"
+          echo "📊 Code coverage meets 95% threshold"
+          echo "🏆 Ready for Home Assistant Platinum submission"

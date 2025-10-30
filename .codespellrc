@@ -1,0 +1,6 @@
+[codespell]
+# Skip generated files, binary files, and cache directories
+skip = *.json,*.lock,.git,__pycache__,*.pyc,.venv,*.pb2.py
+# Ignore words that are not typos
+ignore-words-list = hass,caf
+

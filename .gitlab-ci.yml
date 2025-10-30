@@ -1,0 +1,340 @@
+---
+# GitLab CI/CD Configuration for esp_weaver
+# Home Assistant Custom Integration - Official Standards Compliant
+# Reference: https://github.com/home-assistant/core/.pre-commit-config.yaml
+
+stages:
+  - validate
+  - lint
+  - test
+  - deploy
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PYTHONUNBUFFERED: "1"
+
+cache:
+  key: "python-deps-v4"
+  paths:
+    - .cache/pip
+  # 注意：移除了 .venv/ 缓存（84000+ 文件太大，导致上传失败）
+  # pip 会从 .cache/pip 中的 wheel 快速安装，无需缓存整个虚拟环境
+
+# =============================================================================
+# Base Template (Shell Executor)
+# =============================================================================
+
+.python-base:
+  image: python:3.13.2
+  tags:
+    - shell
+  before_script:
+    - |
+      python3 -c "import sys; exit(0 if sys.version_info >= (3, 13, 2) else 1)" || \
+        { echo "❌ Python 3.13.2+ required"; exit 1; }
+    - python3 -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip wheel setuptools
+    - pip install -r requirements_test.txt
+
+# =============================================================================
+# Stage: Validate
+# =============================================================================
+
+hacs-validate:
+  extends: .python-base
+  stage: validate
+  script:
+    - |
+      python3 <<'PY'
+      import json
+      import sys
+      from pathlib import Path
+
+      errors = []
+
+      for f in ['hacs.json', 'README.md', 'custom_components/esp_weaver/manifest.json']:
+          if not Path(f).exists():
+              errors.append(f'Missing: {f}')
+
+      if errors:
+          print('❌ HACS validation FAILED:')
+          for e in errors: print(f'  - {e}')
+          sys.exit(1)
+
+      try:
+          with open('hacs.json') as f:
+              hacs = json.load(f)
+          if 'name' not in hacs:
+              errors.append('hacs.json missing name')
+
+          with open('custom_components/esp_weaver/manifest.json') as f:
+              manifest = json.load(f)
+          required = ['domain', 'name', 'version', 'documentation', 'codeowners',
+                     'config_flow', 'iot_class', 'integration_type']
+          for field in required:
+              if field not in manifest:
+                  errors.append(f'manifest.json missing: {field}')
+      except FileNotFoundError as e:
+          errors.append(f'File not found: {e.filename}')
+      except json.JSONDecodeError as e:
+          errors.append(f'Invalid JSON: {e}')
+
+      if errors:
+          print('❌ HACS validation FAILED:')
+          for e in errors: print(f'  - {e}')
+          sys.exit(1)
+      print('✅ HACS validation passed')
+      PY
+
+hassfest-validate:
+  extends: .python-base
+  stage: validate
+  script:
+    - |
+      python3 <<'PY'
+      import json
+      import sys
+      from pathlib import Path
+
+      errors = []
+      try:
+          with open('custom_components/esp_weaver/manifest.json') as f:
+              manifest = json.load(f)
+      except FileNotFoundError:
+          errors.append('manifest.json missing')
+          print('❌ Hassfest validation FAILED:')
+          for e in errors: print(f'  - {e}')
+          sys.exit(1)
+      except json.JSONDecodeError as e:
+          errors.append(f'manifest.json invalid JSON: {e}')
+          print('❌ Hassfest validation FAILED:')
+          for e in errors: print(f'  - {e}')
+          sys.exit(1)
+
+      # Required fields
+      required = {
+          'domain': str, 'name': str, 'version': str,
+          'documentation': str, 'codeowners': list,
+          'config_flow': bool, 'iot_class': str, 'integration_type': str,
+      }
+      for field, ftype in required.items():
+          if field not in manifest:
+              errors.append(f'Missing: {field}')
+          elif not isinstance(manifest[field], ftype):
+              errors.append(f'{field} must be {ftype.__name__}')
+
+      # Validate values
+      if not manifest.get('documentation', '').startswith('https://'):
+          errors.append('documentation must be HTTPS URL')
+
+      for owner in manifest.get('codeowners', []):
+          if not owner.startswith('@'):
+              errors.append(f'codeowner must start with @: {owner}')
+
+      valid_iot = ['cloud_polling', 'cloud_push', 'local_polling',
+                   'local_push', 'calculated', 'assumed_state', 'unknown']
+      if manifest.get('iot_class') not in valid_iot:
+          errors.append(f"Invalid iot_class: {manifest.get('iot_class')}")
+
+      valid_types = ['device', 'hub', 'service', 'system', 'helper']
+      if manifest.get('integration_type') not in valid_types:
+          errors.append(f'Invalid integration_type')
+
+      # Check files
+      for f in ['__init__.py', 'config_flow.py', 'const.py', 'strings.json']:
+          if not Path(f'custom_components/esp_weaver/{f}').exists():
+              errors.append(f'Missing: {f}')
+
+      if errors:
+          print('❌ Hassfest validation FAILED:')
+          for e in errors: print(f'  - {e}')
+          sys.exit(1)
+      print('✅ Hassfest validation passed')
+      PY
+
+# =============================================================================
+# Stage: Lint (Official HA Standards)
+# =============================================================================
+
+ruff-lint:
+  extends: .python-base
+  stage: lint
+  script:
+    # Ruff installed via requirements_test.txt (pinned version)
+    - ruff check custom_components/esp_weaver tests
+
+ruff-format:
+  extends: .python-base
+  stage: lint
+  script:
+    # Ruff installed via requirements_test.txt (pinned version)
+    - ruff format --check custom_components/esp_weaver tests
+
+# ⭐ MANDATORY: Codespell (Home Assistant requirement)
+codespell:
+  extends: .python-base
+  stage: lint
+  script:
+    - pip install codespell==2.3.0
+    - |
+      codespell custom_components tests *.md \
+        --ignore-words-list=hass,caf \
+        --skip="*.json,*.ambr,*.pyc,htmlcov/*,__pycache__/*,*.egg-info/*" \
+        --quiet-level=2
+  allow_failure: false  # ← Must pass!
+
+yamllint:
+  extends: .python-base
+  stage: lint
+  script:
+    - pip install yamllint==1.35.1
+    - yamllint .gitlab-ci.yml custom_components/esp_weaver/quality_scale.yaml
+  allow_failure: true  # Optional: relaxed for development
+
+mypy:
+  extends: .python-base
+  stage: lint
+  script:
+    # Mypy installed via requirements_test.txt (pinned version)
+    # Excludes local_ctrl/ (third-party ESP-IDF code) via pyproject.toml config
+    - mypy custom_components/esp_weaver --config-file=pyproject.toml
+  allow_failure: false  # Type checking should pass
+
+pylint:
+  extends: .python-base
+  stage: lint
+  script:
+    - pip install pylint==3.3.2
+    - pylint custom_components/esp_weaver --ignore=local_ctrl --max-line-length=88
+  allow_failure: false  # Pylint must pass
+
+# =============================================================================
+# Stage: Test
+# =============================================================================
+
+pytest:
+  extends: .python-base
+  stage: test
+  script:
+    - |
+      pytest tests/ \
+        --cov=custom_components/esp_weaver \
+        --cov-report=term-missing:skip-covered \
+        --cov-report=xml:coverage.xml \
+        --cov-report=html:htmlcov \
+        --cov-fail-under=95 \
+        --junitxml=report.xml \
+        --durations=10 \
+        -v
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    when: always
+    paths:
+      - coverage.xml
+      - htmlcov/
+      - report.xml
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    expire_in: 30 days
+
+# ⭐ MANDATORY: Config Flow 100% Coverage
+pytest-config-flow:
+  extends: .python-base
+  stage: test
+  script:
+    - |
+      COLLECT_OUTPUT=$(pytest tests/ -k config_flow --collect-only -q 2>&1)
+      COLLECTED=$(echo "$COLLECT_OUTPUT" | grep -oE '[0-9]+ test' | head -1 | grep -oE '[0-9]+' || echo "0")
+      if [ "$COLLECTED" -gt 0 ]; then
+        pytest tests/ -k config_flow \
+          --cov=custom_components.esp_weaver.config_flow \
+          --cov-report=term-missing \
+          --cov-fail-under=100 \
+          -v
+      else
+        echo "⚠️  No config flow tests collected:"
+        echo "$COLLECT_OUTPUT"
+        exit 1
+      fi
+  allow_failure: false  # ← Must pass!
+
+# =============================================================================
+# Quality Gate (Home Assistant Platinum Standard)
+# =============================================================================
+# This job waits for all checks to complete. Jobs with allow_failure: true
+# will not block the gate if they fail, but we still wait for them to finish.
+#
+# Required (must pass):
+#   - hacs-validate, hassfest-validate
+#   - ruff-lint, ruff-format, codespell, mypy
+#   - pytest (95% coverage), pytest-config-flow (100% coverage)
+#
+# Optional (won't block):
+#   - yamllint, pylint
+
+quality-gate:
+  stage: test
+  tags:
+    - shell
+  needs:
+    # ===== MANDATORY: Must pass =====
+    - hacs-validate
+    - hassfest-validate
+    - ruff-lint
+    - ruff-format
+    - codespell
+    - mypy
+    - pytest
+    - pytest-config-flow
+    # ===== OPTIONAL: Won't block if failed =====
+    - job: yamllint
+      optional: true
+    - job: pylint
+      optional: true
+  script:
+    - echo "✅ All mandatory quality checks passed!"
+    - echo "📊 Code coverage meets 95% threshold"
+    - echo "🏆 Ready for Home Assistant Platinum submission"
+
+# =============================================================================
+# Stage: Deploy (Push to GitHub)
+# =============================================================================
+
+push_to_github:
+  stage: deploy
+  rules:
+    # Version tags (v1.0.0, v1.0.0-rc1, etc.) - auto push
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+(\.\d+)?($|-)/'
+      when: on_success
+    # master branch - auto push
+    - if: '$CI_COMMIT_REF_NAME == "master"'
+      when: on_success
+    # release branches (release/v1.0, etc.) - auto push
+    - if: '$CI_COMMIT_REF_NAME =~ /^release\/v/'
+      when: on_success
+    # All other cases - do not push
+    - when: never
+  image: python:3.13.2
+  tags:
+    - shell
+  variables:
+    GIT_STRATEGY: clone
+  needs:
+    - quality-gate
+  before_script:
+    - echo "Preparing GitHub push..."
+  script:
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - echo -n $GH_PUSH_KEY > ~/.ssh/id_rsa_base64
+    - base64 --decode --ignore-garbage ~/.ssh/id_rsa_base64 > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - echo -e "Host github.com\n\tStrictHostKeyChecking no\n" >> ~/.ssh/config
+    - git remote remove github &>/dev/null || true
+    - git remote add github git@github.com:espressif/esp_weaver.git
+    - ${CI_PROJECT_DIR}/tools/ci/push_to_github.sh
+    - echo "✅ Successfully pushed to GitHub"

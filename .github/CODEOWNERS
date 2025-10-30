@@ -1,0 +1,5 @@
+# Code owners for ESP-HA integration
+# These users will be automatically requested for review on PRs
+
+* @espressif
+

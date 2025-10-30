@@ -1,0 +1,284 @@
+{
+  "exceptions": {
+    "min_threshold_too_high": {
+      "message": "最小阈值 ({value}) 必须小于最大阈值 ({max_value})。"
+    },
+    "max_threshold_too_low": {
+      "message": "最大阈值 ({value}) 必须大于最小阈值 ({min_value})。"
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "ESP 设备发现",
+        "description": "正在搜索网络中的 ESP 设备..."
+      },
+      "pop_input": {
+        "title": "需要安全认证",
+        "description": "设备 \"{device_name}\" ({device_ip}) 需要认证。",
+        "data": {
+          "custom_pop": "PoP 认证码"
+        },
+        "data_description": {
+          "custom_pop": "请输入设备上配置的 PoP（所有权证明）码。"
+        }
+      },
+      "device_setup": {
+        "title": "选择设备",
+        "description": "发现 {device_count} 个 ESP 设备。选择一个添加。\n\n设备格式：名称 (IP) [安全性]\n• Open = 无需认证\n• Protected = 需要认证码\n\n您可以稍后添加其他设备。",
+        "data": {
+          "selected_device": "设备"
+        },
+        "data_description": {
+          "selected_device": "选择要添加的 ESP 设备。"
+        }
+      }
+    },
+    "error": {
+      "no_devices_selected": "请选择一个设备。",
+      "pop_required": "PoP 认证码是必需的。",
+      "invalid_pop": "PoP 认证码无效，请检查后重试。",
+      "unknown": "发生未知错误。",
+      "cannot_connect": "无法连接到设备。",
+      "timeout": "连接超时。",
+      "invalid_auth": "认证失败。",
+      "invalid_device_selection": "无效的设备选择。"
+    },
+    "abort": {
+      "already_configured": "设备已配置。",
+      "no_devices_found": "未在网络中发现 ESP 设备。",
+      "no_new_devices_found": "所有发现的设备均已配置。",
+      "no_node_id": "设备没有有效的节点 ID。",
+      "no_options_available": "此设备没有可用的配置选项。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ESP-Weaver 选项",
+        "description": "当前没有可用的配置选项。"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_energy": {
+        "name": "电池",
+        "state_attributes": {
+          "battery_level": {
+            "name": "电池电量"
+          },
+          "voltage": {
+            "name": "电压"
+          },
+          "temperature": {
+            "name": "温度"
+          },
+          "charging_status": {
+            "name": "充电状态"
+          },
+          "alert_level": {
+            "name": "警报级别"
+          }
+        }
+      },
+      "imu_gesture": {
+        "name": "IMU 手势",
+        "state": {
+          "idle": "空闲",
+          "tap": "单击",
+          "double_tap": "双击",
+          "shake": "摇晃",
+          "tilt_left": "左倾",
+          "tilt_right": "右倾",
+          "tilt_up": "上倾",
+          "tilt_down": "下倾",
+          "flip": "翻转",
+          "rotate_cw": "顺时针旋转",
+          "rotate_ccw": "逆时针旋转"
+        },
+        "state_attributes": {
+          "gesture": {
+            "name": "手势"
+          },
+          "confidence": {
+            "name": "置信度"
+          },
+          "power": {
+            "name": "力度"
+          },
+          "sensitivity": {
+            "name": "灵敏度"
+          },
+          "orientation_x": {
+            "name": "X轴方向"
+          },
+          "orientation_y": {
+            "name": "Y轴方向"
+          },
+          "orientation_z": {
+            "name": "Z轴方向"
+          }
+        }
+      },
+      "interactive_input": {
+        "name": "交互输入",
+        "state": {
+          "none": "无",
+          "click": "单击",
+          "double_click": "双击",
+          "long_press": "长按",
+          "angle": "角度",
+          "increment": "增量",
+          "speed": "速度",
+          "tap": "点击",
+          "double_tap": "双击",
+          "swipe": "滑动"
+        },
+        "state_attributes": {
+          "input_type": {
+            "name": "输入类型"
+          },
+          "input_events": {
+            "name": "输入事件"
+          },
+          "input_value": {
+            "name": "输入值"
+          },
+          "sensitivity": {
+            "name": "灵敏度"
+          }
+        }
+      },
+      "low_power_sleep": {
+        "name": "低功耗睡眠",
+        "state": {
+          "awake": "唤醒",
+          "light_sleep": "浅度睡眠",
+          "deep_sleep": "深度睡眠",
+          "hibernation": "休眠"
+        },
+        "state_attributes": {
+          "wake_reason": {
+            "name": "唤醒原因"
+          },
+          "wake_window_status": {
+            "name": "唤醒窗口状态"
+          },
+          "sleep_duration": {
+            "name": "睡眠时长"
+          },
+          "wake_count": {
+            "name": "唤醒次数"
+          }
+        }
+      },
+      "temperature": {
+        "name": "温度"
+      },
+      "humidity": {
+        "name": "湿度"
+      },
+      "pressure": {
+        "name": "气压"
+      },
+      "ambient_temperature": {
+        "name": "环境温度"
+      },
+      "illuminance": {
+        "name": "照度"
+      },
+      "battery_level": {
+        "name": "电池电量"
+      },
+      "ambient_humidity": {
+        "name": "环境湿度"
+      },
+      "co2": {
+        "name": "二氧化碳"
+      },
+      "voc": {
+        "name": "挥发性有机物"
+      },
+      "pm25": {
+        "name": "PM2.5"
+      }
+    },
+    "binary_sensor": {
+      "binary_sensor": {
+        "name": "二进制传感器",
+        "state_attributes": {
+          "binary_sensor_type": {
+            "name": "传感器类型"
+          },
+          "debounce_time": {
+            "name": "消抖时间"
+          },
+          "report_interval": {
+            "name": "上报间隔"
+          }
+        }
+      }
+    },
+    "light": {
+      "light": {
+        "name": "灯",
+        "state_attributes": {
+          "intensity": {
+            "name": "强度"
+          },
+          "light_mode": {
+            "name": "灯光模式"
+          },
+          "color_temp_percent": {
+            "name": "色温百分比"
+          }
+        }
+      }
+    },
+    "number": {
+      "temperature_min_threshold": {
+        "name": "温度最小阈值"
+      },
+      "temperature_max_threshold": {
+        "name": "温度最大阈值"
+      },
+      "humidity_min_threshold": {
+        "name": "湿度最小阈值"
+      },
+      "humidity_max_threshold": {
+        "name": "湿度最大阈值"
+      },
+      "pressure_min_threshold": {
+        "name": "气压最小阈值"
+      },
+      "pressure_max_threshold": {
+        "name": "气压最大阈值"
+      },
+      "illuminance_min_threshold": {
+        "name": "照度最小阈值"
+      },
+      "illuminance_max_threshold": {
+        "name": "照度最大阈值"
+      },
+      "co2_min_threshold": {
+        "name": "二氧化碳最小阈值"
+      },
+      "co2_max_threshold": {
+        "name": "二氧化碳最大阈值"
+      },
+      "voc_min_threshold": {
+        "name": "挥发性有机物最小阈值"
+      },
+      "voc_max_threshold": {
+        "name": "挥发性有机物最大阈值"
+      },
+      "pm25_min_threshold": {
+        "name": "PM2.5最小阈值"
+      },
+      "pm25_max_threshold": {
+        "name": "PM2.5最大阈值"
+      }
+    }
+  }
+}

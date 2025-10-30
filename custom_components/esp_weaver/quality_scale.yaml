@@ -1,0 +1,142 @@
+---
+# Quality Scale validation for ESP-Weaver integration
+# Platinum level requirements (highest quality standard)
+
+rules:
+  # =========================================================================
+  # Bronze tier - Basic Requirements
+  # =========================================================================
+  config-flow:
+    status: done
+    comment: >-
+      Full config flow with device discovery, PoP authentication, and error handling
+
+  entity-unique-id:
+    status: done
+    comment: All entities use unique_id based on node_id and entity type
+
+  action-setup:
+    status: exempt
+    comment: Integration does not register custom actions, uses standard entity services
+
+  reauthentication-flow:
+    status: exempt
+    comment: ESP devices do not support changing PoP after initial setup
+
+  appropriate-polling:
+    status: done
+    comment: >-
+      Primary updates via HTTP active reports (push), internal polling for availability
+
+  entity-event-setup:
+    status: done
+    comment: >-
+      Entities subscribe to events in async_added_to_hass and unsubscribe via async_on_remove
+
+  test-before-setup:
+    status: done
+    comment: Connection tested in config flow before creating config entry
+
+  # =========================================================================
+  # Silver tier - Enhanced Requirements
+  # =========================================================================
+  entity-unavailable:
+    status: done
+    comment: >-
+      Implemented via api.is_device_available() with connection and session state checks
+
+  parallel-updates:
+    status: done
+    comment: PARALLEL_UPDATES = 0 added to all platform files
+
+  log-when-unavailable:
+    status: done
+    comment: >-
+      Device availability changes logged in coordinator.py and connection_manager.py
+
+  coordinator:
+    status: done
+    comment: ESPDataUpdateCoordinator with exponential backoff reconnection
+
+  config-entry-unloading:
+    status: done
+    comment: async_unload_entry properly cleans up resources and cached data
+
+  # =========================================================================
+  # Gold tier - Advanced Requirements
+  # =========================================================================
+  config-entry-migration:
+    status: done
+    comment: async_migrate_entry implemented for future version upgrades
+
+  options-flow:
+    status: exempt
+    comment: >-
+      No user-configurable options - polling is internal, not user-configurable
+
+  reconfiguration-flow:
+    status: exempt
+    comment: >-
+      No user-configurable options needed, device settings auto-discovered from ESP device
+
+  stale-devices:
+    status: done
+    comment: async_remove_config_entry_device allows removal of offline devices
+
+  entity-category:
+    status: done
+    comment: >-
+      Threshold numbers use CONFIG category, other entities are primary (no category)
+
+  entity-disabled-by-default:
+    status: exempt
+    comment: All entities enabled by default as they represent primary device functions
+
+  discovery:
+    status: done
+    comment: >-
+      Config flow uses async_discover_devices() with zeroconf ServiceBrowser
+      for automatic device detection
+
+  exception-translations:
+    status: exempt
+    comment: >-
+      Internal errors use RuntimeError, user-facing errors in config flow use error dict
+
+  # =========================================================================
+  # Platinum tier - Highest Quality
+  # =========================================================================
+  async-dependency:
+    status: done
+    comment: All operations use async/await, blocking calls via run_in_executor
+
+  test-coverage:
+    status: done
+    comment: 95%+ test coverage with comprehensive unit and integration tests
+
+  integration-tests:
+    status: done
+    comment: Full pytest test suite with pytest-homeassistant-custom-component
+
+  # =========================================================================
+  # Exempt rules (not applicable to this integration)
+  # =========================================================================
+  brands:
+    status: exempt
+    comment: Custom integration, not in core repository
+
+  dhcp:
+    status: exempt
+    comment: Uses mDNS/Zeroconf for device discovery, not DHCP
+
+  mqtt:
+    status: exempt
+    comment: Integration does not use MQTT protocol
+
+  ssdp:
+    status: exempt
+    comment: Uses mDNS/Zeroconf for device discovery, not SSDP
+
+  usb:
+    status: exempt
+    comment: Network-based integration, no USB device support

@@ -1,0 +1,284 @@
+{
+  "exceptions": {
+    "min_threshold_too_high": {
+      "message": "Minimum threshold ({value}) must be less than maximum threshold ({max_value})."
+    },
+    "max_threshold_too_low": {
+      "message": "Maximum threshold ({value}) must be greater than minimum threshold ({min_value})."
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "ESP Device Discovery",
+        "description": "Searching for ESP devices on your network..."
+      },
+      "pop_input": {
+        "title": "Authentication Required",
+        "description": "Device \"{device_name}\" at {device_ip} requires authentication.",
+        "data": {
+          "custom_pop": "PoP Code"
+        },
+        "data_description": {
+          "custom_pop": "Enter the PoP (Proof of Possession) code configured on your device."
+        }
+      },
+      "device_setup": {
+        "title": "Select Device",
+        "description": "Found {device_count} ESP device(s). Select one to add.\n\nDevice format: Name (IP) [Security]\n• Open = No authentication required\n• Protected = Requires authentication code\n\nYou can add additional devices later.",
+        "data": {
+          "selected_device": "Device"
+        },
+        "data_description": {
+          "selected_device": "Select the ESP device to add."
+        }
+      }
+    },
+    "error": {
+      "no_devices_selected": "Please select a device.",
+      "pop_required": "PoP code is required.",
+      "invalid_pop": "Invalid PoP code. Please check and try again.",
+      "unknown": "An unexpected error occurred.",
+      "cannot_connect": "Failed to connect to device.",
+      "timeout": "Connection timed out.",
+      "invalid_auth": "Authentication failed.",
+      "invalid_device_selection": "Invalid device selection."
+    },
+    "abort": {
+      "already_configured": "Device already configured.",
+      "no_devices_found": "No ESP devices found on the network.",
+      "no_new_devices_found": "All discovered devices are already configured.",
+      "no_node_id": "Device does not have a valid node ID.",
+      "no_options_available": "No configuration options are available for this device."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ESP-Weaver Options",
+        "description": "No configuration options are currently available."
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_energy": {
+        "name": "Battery",
+        "state_attributes": {
+          "battery_level": {
+            "name": "Battery Level"
+          },
+          "voltage": {
+            "name": "Voltage"
+          },
+          "temperature": {
+            "name": "Temperature"
+          },
+          "charging_status": {
+            "name": "Charging Status"
+          },
+          "alert_level": {
+            "name": "Alert Level"
+          }
+        }
+      },
+      "imu_gesture": {
+        "name": "IMU Gesture",
+        "state": {
+          "idle": "Idle",
+          "tap": "Tap",
+          "double_tap": "Double Tap",
+          "shake": "Shake",
+          "tilt_left": "Tilt Left",
+          "tilt_right": "Tilt Right",
+          "tilt_up": "Tilt Up",
+          "tilt_down": "Tilt Down",
+          "flip": "Flip",
+          "rotate_cw": "Rotate Clockwise",
+          "rotate_ccw": "Rotate Counterclockwise"
+        },
+        "state_attributes": {
+          "gesture": {
+            "name": "Gesture"
+          },
+          "confidence": {
+            "name": "Confidence"
+          },
+          "power": {
+            "name": "Power"
+          },
+          "sensitivity": {
+            "name": "Sensitivity"
+          },
+          "orientation_x": {
+            "name": "Orientation X"
+          },
+          "orientation_y": {
+            "name": "Orientation Y"
+          },
+          "orientation_z": {
+            "name": "Orientation Z"
+          }
+        }
+      },
+      "interactive_input": {
+        "name": "Interactive Input",
+        "state": {
+          "none": "None",
+          "click": "Click",
+          "double_click": "Double Click",
+          "long_press": "Long Press",
+          "angle": "Angle",
+          "increment": "Increment",
+          "speed": "Speed",
+          "tap": "Tap",
+          "double_tap": "Double Tap",
+          "swipe": "Swipe"
+        },
+        "state_attributes": {
+          "input_type": {
+            "name": "Input Type"
+          },
+          "input_events": {
+            "name": "Input Events"
+          },
+          "input_value": {
+            "name": "Input Value"
+          },
+          "sensitivity": {
+            "name": "Sensitivity"
+          }
+        }
+      },
+      "low_power_sleep": {
+        "name": "Low Power Sleep",
+        "state": {
+          "awake": "Awake",
+          "light_sleep": "Light Sleep",
+          "deep_sleep": "Deep Sleep",
+          "hibernation": "Hibernation"
+        },
+        "state_attributes": {
+          "wake_reason": {
+            "name": "Wake Reason"
+          },
+          "wake_window_status": {
+            "name": "Wake Window Status"
+          },
+          "sleep_duration": {
+            "name": "Sleep Duration"
+          },
+          "wake_count": {
+            "name": "Wake Count"
+          }
+        }
+      },
+      "temperature": {
+        "name": "Temperature"
+      },
+      "humidity": {
+        "name": "Humidity"
+      },
+      "pressure": {
+        "name": "Pressure"
+      },
+      "ambient_temperature": {
+        "name": "Ambient Temperature"
+      },
+      "illuminance": {
+        "name": "Illuminance"
+      },
+      "battery_level": {
+        "name": "Battery Level"
+      },
+      "ambient_humidity": {
+        "name": "Ambient Humidity"
+      },
+      "co2": {
+        "name": "CO2"
+      },
+      "voc": {
+        "name": "VOC"
+      },
+      "pm25": {
+        "name": "PM2.5"
+      }
+    },
+    "binary_sensor": {
+      "binary_sensor": {
+        "name": "Binary Sensor",
+        "state_attributes": {
+          "binary_sensor_type": {
+            "name": "Sensor Type"
+          },
+          "debounce_time": {
+            "name": "Debounce Time"
+          },
+          "report_interval": {
+            "name": "Report Interval"
+          }
+        }
+      }
+    },
+    "light": {
+      "light": {
+        "name": "Light",
+        "state_attributes": {
+          "intensity": {
+            "name": "Intensity"
+          },
+          "light_mode": {
+            "name": "Light Mode"
+          },
+          "color_temp_percent": {
+            "name": "Color Temperature Percent"
+          }
+        }
+      }
+    },
+    "number": {
+      "temperature_min_threshold": {
+        "name": "Temperature Min Threshold"
+      },
+      "temperature_max_threshold": {
+        "name": "Temperature Max Threshold"
+      },
+      "humidity_min_threshold": {
+        "name": "Humidity Min Threshold"
+      },
+      "humidity_max_threshold": {
+        "name": "Humidity Max Threshold"
+      },
+      "pressure_min_threshold": {
+        "name": "Pressure Min Threshold"
+      },
+      "pressure_max_threshold": {
+        "name": "Pressure Max Threshold"
+      },
+      "illuminance_min_threshold": {
+        "name": "Illuminance Min Threshold"
+      },
+      "illuminance_max_threshold": {
+        "name": "Illuminance Max Threshold"
+      },
+      "co2_min_threshold": {
+        "name": "CO2 Min Threshold"
+      },
+      "co2_max_threshold": {
+        "name": "CO2 Max Threshold"
+      },
+      "voc_min_threshold": {
+        "name": "VOC Min Threshold"
+      },
+      "voc_max_threshold": {
+        "name": "VOC Max Threshold"
+      },
+      "pm25_min_threshold": {
+        "name": "PM2.5 Min Threshold"
+      },
+      "pm25_max_threshold": {
+        "name": "PM2.5 Max Threshold"
+      }
+    }
+  }
+}
