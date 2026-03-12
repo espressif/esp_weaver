@@ -1,0 +1,77 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Linting
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Home Assistant
+.storage/
+home-assistant.log
+
+# Python version management
+.python-version
+
+# Backup files
+*.bak
+
+# Environment overrides
+.env.local
+
+# Generated protobuf files (exclude from root/tests, but include protocol/)
+# The ESP Local Control protocol files in iot/local_ctrl/protocol/ must be committed
+*_pb2.py
+!custom_components/esp_weaver/iot/local_ctrl/protocol/*_pb2.py

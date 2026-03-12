@@ -1,0 +1,14 @@
+{
+  "domain": "esp_weaver",
+  "name": "ESP-Weaver",
+  "codeowners": ["@espressif"],
+  "config_flow": true,
+  "dependencies": ["zeroconf"],
+  "documentation": "https://github.com/espressif/esp_weaver",
+  "homeassistant": "2025.12.5",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "loggers": ["esp_weaver"],
+  "requirements": ["protobuf>=6.31.0"],
+  "version": "0.0.1"
+}

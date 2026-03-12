@@ -1,0 +1,24 @@
+# Python version requirement: >= 3.13.2
+# This matches Home Assistant 2025.12.5+ requirement
+# Please ensure your virtual environment uses Python 3.13.2+
+
+# ============================================================
+# Core test framework - manages ALL test dependencies including:
+# homeassistant, pytest, pytest-asyncio, pytest-cov, freezegun,
+# aiohttp, syrupy, and many other test utilities
+# ============================================================
+# pytest-homeassistant-custom-component pins homeassistant version
+# This package auto-updates daily to match the latest HA version
+# 0.13.301 corresponds to HA 2025.12.4
+pytest-homeassistant-custom-component>=0.13.301
+
+# ============================================================
+# ESP-Weaver specific dependencies (NOT in pytest-homeassistant-custom-component)
+# ============================================================
+# Protocol buffers (required by esp_iot)
+# Note: Must match the version used to generate *_pb2.py files
+protobuf>=6.31.0
+
+# Linting tools
+ruff==0.14.11
+mypy==1.19.1
