@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-ESP-Weaver 是一个用于 Home Assistant 的本地集成组件，让您能够在 Home Assistant 中控制和管理基于 Espressif (ESP) 芯片（ESP32、ESP32-S3、ESP32-C 系列）的 IoT 智能设备。
+ESP-Weaver 是一个用于 Home Assistant 的集成组件，让您能够在 Home Assistant 中控制和管理基于 Espressif (ESP) 芯片（ESP32、ESP32-S3、ESP32-C 系列）的 IoT 智能设备。支持**本地控制**（局域网内直接通信）和**云端控制**（通过 ESP RainMaker 云服务）两种模式。
 
 > [!NOTE]
 > "Weaver" 取自织巢鸟——一种能将零散草叶编织成精密巢穴的鸟类。ESP-Weaver 的理念与此相似：将网络中分散的 ESP 设备整合为一体，构建成 Home Assistant 中紧密互联的智能家居系统。
@@ -18,12 +18,27 @@ ESP-Weaver 是一个用于 Home Assistant 的本地集成组件，让您能够�
 
 ## 功能特性
 
+### 本地控制
+
 - **本地通信**：全部数据交互在局域网内完成
 - **自动发现**：基于 mDNS/Zeroconf 协议自动发现并识别网络内的 ESP 设备
 - **实时同步**：采用 HTTP 长连接机制，支持设备状态的实时推送
 - **安全传输**：支持 ESP Local Control Sec0/Sec1 加密协议
-- **实体支持**：支持 Light、Sensor、Binary Sensor、Number 等多种实体类型
 - **自动重连**：具备设备在线状态检测与断线自动恢复能力
+
+### 云端控制（ESP RainMaker）
+
+- **云端通信**：通过 ESP RainMaker 云服务控制设备
+- **账号登录**：支持 ESP RainMaker 账号登录（全球区域；中国区域计划中）
+- **BLE 配网**：通过 BLE 为新设备配置 WiFi 凭据并完成配网
+- **导入已有设备**：添加已注册在 RainMaker 账号中的设备
+- **在线状态检测**：定期轮询设备连接状态，离线/上线自动切换可用性
+- **CLI 自动安装**：首次使用时自动安装 `esp-rainmaker-cli`
+
+### 通用
+
+- **实体支持**：支持 Light、Sensor、Binary Sensor、Number 等多种实体类型
+- **双模式**：每个设备可在配置时独立选择本地控制或云端控制模式
 
 ### 支持的实体类型
 
@@ -129,15 +144,17 @@ config/
 
 ## 设备固件
 
-ESP-Weaver 需要设备运行支持 ESP Weaver 本地控制协议的兼容固件。设备端 SDK 组件（`esp_weaver`）和示例固件位于 [esp-iot-solution](https://github.com/espressif/esp-iot-solution) 仓库中。
+### 本地控制固件
 
-### 支持的芯片
+本地控制模式需要设备运行支持 ESP Weaver 本地控制协议的固件。设备端 SDK 组件（`esp_weaver`）和示例固件位于 [esp-iot-solution](https://github.com/espressif/esp-iot-solution) 仓库中。
+
+#### 支持的芯片（本地控制）
 
 | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-S3 |
 | ----- | -------- | -------- | -------- | -------- | --------- | -------- |
 |   ✓   |    ✓     |    ✓     |    ✓     |    ✓     |     ✓     |    ✓     |
 
-### 获取固件
+#### 获取固件
 
 ```bash
 # 克隆仓库
@@ -145,7 +162,7 @@ git clone https://github.com/espressif/esp-iot-solution.git
 cd esp-iot-solution/examples/weaver
 ```
 
-### 可用示例
+#### 可用示例
 
 仓库提供了开箱即用的示例项目：
 
@@ -154,21 +171,62 @@ cd esp-iot-solution/examples/weaver
 | `led_light` | 智能灯光设备，支持电源开关、亮度调节、HSV 颜色控制、色温调节 |
 | `imu_gesture` | IMU 手势传感器，支持多种手势识别（翻转、摇晃、旋转、拍手等） |
 
-### 编译与烧录
+#### 编译与烧录
 
 请参阅 [ESP Weaver 组件 README](https://github.com/espressif/esp-iot-solution/tree/master/components/esp_weaver) 及各示例目录中的 README 了解详细的编译和烧录步骤。
 
 > [!TIP]
 > 详细的编译说明和设备特定配置，请参阅各示例目录中的 README 文件。
 
+### 云端控制固件（ESP RainMaker）
+
+云端控制模式需要设备运行官方 ESP RainMaker 固件。参考固件为 [esp-rainmaker](https://github.com/espressif/esp-rainmaker) 仓库中的 `led_light` 示例。
+
+#### 支持的芯片（云端控制）
+
+| ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-S3 |
+| ----- | -------- | -------- | -------- | -------- | --------- | -------- |
+|   -   |    -     |    ✓     |    ✓     |    ✓     |     -     |    ✓     |
+
+> [!NOTE]
+> 云端控制目前支持 ESP32-C3、ESP32-C5、ESP32-C6 和 ESP32-S3。ESP32、ESP32-C2 和 ESP32-C61 的支持将在后续版本中添加。
+
+#### 获取固件
+
+```bash
+# 克隆仓库
+git clone https://github.com/espressif/esp-rainmaker.git
+cd esp-rainmaker/examples/led_light
+```
+
+#### 编译与烧录
+
+请参阅 [ESP RainMaker LED Light 示例](https://github.com/espressif/esp-rainmaker/tree/master/examples/led_light) README 了解详细的编译和烧录步骤。
+
 ## 设备配置
 
-集成支持自动发现局域网内的 ESP 设备：
+### 添加设备
 
 1. 进入 **设置** → **设备与服务** → **添加集成**
 2. 搜索并选择 **ESP-Weaver**
-3. 从已发现的设备列表中选择目标设备
-4. 若设备启用安全模式（Sec1），需输入 PoP 凭据
+3. 选择连接模式：**本地控制** 或 **云端控制**
+
+### 本地控制配置
+
+1. 集成会通过 mDNS 自动发现局域网内的 ESP 设备
+2. 从已发现的设备列表中选择目标设备
+3. 若设备启用安全模式（Sec1），需输入 PoP 凭据
+
+### 云端控制配置（ESP RainMaker）
+
+1. 选择 **Cloud Control (ESP RainMaker)** 连接模式
+2. 选择区域（目前仅支持全球），使用 RainMaker 账号登录
+3. 选择操作：
+   - **添加已有设备**：选择已注册在 RainMaker 账号中的设备
+   - **配网新设备**：输入 BLE 设备名称（如串口日志中的 `PROV_XXXXXX`），配置 WiFi 凭据和 PoP（Proof of Possession），集成将自动完成配网和注册
+
+> [!IMPORTANT]
+> **配网新设备**需要运行 Home Assistant 的主机（PC、树莓派等）具备蓝牙（BLE）功能。添加已有设备不需要此条件。
 
 配置完成后，设备实体将自动注册至 Home Assistant。
 
@@ -185,18 +243,21 @@ cd esp-iot-solution/examples/weaver
 │  coordinator.py (ESPDataUpdateCoordinator)                  │
 │  └── 数据更新、可用性检查、重连逻辑                          │
 ├─────────────────────────────────────────────────────────────┤
-│  iot/client/device_api.py (ESPWeaverApi)                        │
+│  iot/client/device_api.py (ESPWeaverApi)                    │
 │  └── 主 API 协调器，委托到各管理器                           │
-├─────────────────────────────────────────────────────────────┤
+├──────────────────────┬──────────────────────────────────────┤
+│  本地控制路径         │  云端控制路径                         │
+├──────────────────────┼──────────────────────────────────────┤
+│  iot/client/client.py│  iot/cloud/rmaker_cli_client.py      │
+│  (ESPLocalCtrlClient)│  (RainMakerCLIClient)                │
+│  └── ESP Local Ctrl  │  └── ESP RainMaker CLI               │
+├──────────────────────┴──────────────────────────────────────┤
 │  iot/managers/ (管理器类)                                   │
 │  ├── DeviceRegistry      - 设备状态注册表                    │
 │  ├── AvailabilityManager - 可用性检测                        │
 │  ├── ConnectionManager   - 连接生命周期                      │
 │  ├── PropertyManager     - 属性读写和消息处理                │
 │  └── DeviceDiscoveryManager - 实体发现                       │
-├─────────────────────────────────────────────────────────────┤
-│  iot/client/client.py (ESPLocalCtrlClient)                  │
-│  └── ESP Local Control 协议底层实现                          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -211,7 +272,8 @@ cd esp-iot-solution/examples/weaver
 | **ConnectionManager** | `iot/managers/connection_manager.py` | 连接建立、重连逻辑 |
 | **PropertyManager** | `iot/managers/property_manager.py` | 属性操作、事件分发 |
 | **DeviceDiscoveryManager** | `iot/managers/entity_discovery.py` | 配置解析、实体发现 |
-| **ESPLocalCtrlClient** | `iot/client/client.py` | 协议层设备通信 |
+| **ESPLocalCtrlClient** | `iot/client/client.py` | 协议层本地设备通信 |
+| **RainMakerCLIClient** | `iot/cloud/rmaker_cli_client.py` | ESP RainMaker 云端通信（通过 CLI） |
 
 
 ## 参考文档
@@ -219,6 +281,7 @@ cd esp-iot-solution/examples/weaver
 | 资源 | 链接 |
 |------|------|
 | ESP Weaver SDK | [esp-iot-solution/components/esp_weaver](https://github.com/espressif/esp-iot-solution/tree/master/components/esp_weaver) |
+| ESP RainMaker | [github.com/espressif/esp-rainmaker](https://github.com/espressif/esp-rainmaker) |
 | ESP Local Control | [ESP-IDF 编程指南](https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32/api-reference/protocols/esp_local_ctrl.html) |
 | Home Assistant 开发 | [developers.home-assistant.io](https://developers.home-assistant.io/) |
 

@@ -405,7 +405,7 @@ class TestLightControlListener:
         mock_hass.bus = MagicMock()
         mock_hass.bus.async_listen = MagicMock()
         mock_api = MagicMock()
-        mock_api.set_local_ctrl_property = AsyncMock(return_value=True)
+        mock_api.set_property = AsyncMock(return_value=True)
 
         setup_light_control_listener(mock_hass, "node123", mock_api)
         mock_hass.bus.async_listen.assert_called_once()
@@ -415,7 +415,7 @@ class TestLightControlListener:
         mock_hass = MagicMock()
         mock_hass.bus = MagicMock()
         mock_api = MagicMock()
-        mock_api.set_local_ctrl_property = AsyncMock(return_value=True)
+        mock_api.set_property = AsyncMock(return_value=True)
 
         setup_light_control_listener(mock_hass, "node123", mock_api)
         handler = mock_hass.bus.async_listen.call_args[0][1]
@@ -424,14 +424,14 @@ class TestLightControlListener:
         mock_event.data = {"node_id": "other_node", "properties": {"power": True}}
         await handler(mock_event)
 
-        mock_api.set_local_ctrl_property.assert_not_called()
+        mock_api.set_property.assert_not_called()
 
     async def test_handler_processes_matching_node(self) -> None:
         """Test handler processes events for matching node."""
         mock_hass = MagicMock()
         mock_hass.bus = MagicMock()
         mock_api = MagicMock()
-        mock_api.set_local_ctrl_property = AsyncMock(return_value=True)
+        mock_api.set_property = AsyncMock(return_value=True)
 
         setup_light_control_listener(mock_hass, "node123", mock_api)
         handler = mock_hass.bus.async_listen.call_args[0][1]
@@ -440,14 +440,14 @@ class TestLightControlListener:
         mock_event.data = {"node_id": "node123", "properties": {"power": True}}
         await handler(mock_event)
 
-        mock_api.set_local_ctrl_property.assert_called()
+        mock_api.set_property.assert_called()
 
     async def test_handler_ignores_empty_properties(self) -> None:
         """Test handler ignores events with empty properties."""
         mock_hass = MagicMock()
         mock_hass.bus = MagicMock()
         mock_api = MagicMock()
-        mock_api.set_local_ctrl_property = AsyncMock(return_value=True)
+        mock_api.set_property = AsyncMock(return_value=True)
 
         setup_light_control_listener(mock_hass, "node123", mock_api)
         handler = mock_hass.bus.async_listen.call_args[0][1]
@@ -456,16 +456,14 @@ class TestLightControlListener:
         mock_event.data = {"node_id": "node123", "properties": {}}
         await handler(mock_event)
 
-        mock_api.set_local_ctrl_property.assert_not_called()
+        mock_api.set_property.assert_not_called()
 
     async def test_handler_handles_network_errors(self) -> None:
         """Test handler handles network errors gracefully."""
         mock_hass = MagicMock()
         mock_hass.bus = MagicMock()
         mock_api = MagicMock()
-        mock_api.set_local_ctrl_property = AsyncMock(
-            side_effect=OSError("Network error")
-        )
+        mock_api.set_property = AsyncMock(side_effect=OSError("Network error"))
 
         setup_light_control_listener(mock_hass, "node123", mock_api)
         handler = mock_hass.bus.async_listen.call_args[0][1]
@@ -671,7 +669,7 @@ class TestSensorAlertServiceViolations:
         mock_hass.services = MagicMock()
         mock_hass.services.async_call = AsyncMock()
         mock_api = MagicMock()
-        mock_api.set_local_ctrl_property = AsyncMock()
+        mock_api.set_property = AsyncMock()
         mock_hass.data = {"esp_weaver": {"api": mock_api}}
 
         mock_registry = _create_mock_entity_registry()

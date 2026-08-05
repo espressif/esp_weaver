@@ -22,6 +22,7 @@ from .helpers.discovery import setup_platform_discovery
 from .helpers.ha_types import ESPConfigEntry
 from .helpers.threshold_manager import ThresholdManager
 from .helpers.utils import get_number_device_class_and_unit
+from .intents import async_setup_intents
 from .iot.specs.events import (
     DOMAIN,
     EVENT_SENSOR_DISCOVERED,
@@ -66,6 +67,8 @@ _LOGGER = logging.getLogger(__name__)
 # Coordinator handles all updates, no parallel update limit needed
 PARALLEL_UPDATES: Final = 0
 
+_KEY_INTENTS_REGISTERED: Final = "intents_registered"
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -73,6 +76,11 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up number platform from config entry."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if not domain_data.get(_KEY_INTENTS_REGISTERED):
+        domain_data[_KEY_INTENTS_REGISTERED] = True
+        await async_setup_intents(hass)
+
     result = setup_platform_discovery(
         config_entry=config_entry,
         async_add_entities=async_add_entities,

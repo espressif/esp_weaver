@@ -10,8 +10,67 @@
   "config": {
     "step": {
       "user": {
-        "title": "ESP 设备发现",
-        "description": "正在搜索网络中的 ESP 设备..."
+        "title": "连接模式",
+        "description": "选择如何连接您的 ESP 设备。\n\n• **本地控制**：通过 mDNS 发现本地网络中的设备（推荐，延迟低）\n• **云端控制**：通过 ESP RainMaker 云端连接（适用于设备不在本地网络时）",
+        "data": {
+          "connection_mode": "连接模式"
+        }
+      },
+      "rainmaker_login": {
+        "title": "RainMaker 登录",
+        "description": "登录您的 ESP RainMaker 账户。\n\n输入您的 RainMaker 凭据以访问云端设备。",
+        "data": {
+          "rainmaker_region": "区域",
+          "email": "邮箱",
+          "password": "密码"
+        },
+        "data_description": {
+          "rainmaker_region": "选择您的设备注册所在的 RainMaker 区域。",
+          "email": "您的 ESP RainMaker 账户邮箱地址。",
+          "password": "您的 ESP RainMaker 账户密码。"
+        }
+      },
+      "cloud_action_select": {
+        "title": "选择操作",
+        "description": "选择您要执行的操作：\n\n• **添加现有设备**：添加已在 RainMaker 账户中注册的设备\n• **配网新设备**：通过蓝牙配置新设备并添加到您的账户",
+        "data": {
+          "action": "操作"
+        }
+      },
+      "ble_scan": {
+        "title": "输入设备名称",
+        "description": "给 ESP 设备上电，查看串口日志中类似如下的信息：\n\n**Provisioning started with service name : PROV_XXXXXX**\n\n在下方输入设备名称（如 PROV_724d86）。",
+        "data": {
+          "device_name": "设备名称（来自串口日志）"
+        }
+      },
+      "wifi_config": {
+        "title": "WiFi 配置",
+        "description": "为设备「{device_name}」输入 WiFi 凭据。\n\n配网完成后，设备将连接到此 WiFi 网络。",
+        "data": {
+          "wifi_ssid": "WiFi 网络名称 (SSID)",
+          "wifi_password": "WiFi 密码",
+          "device_pop": "PoP 所有权证明码（可选）"
+        },
+        "data_description": {
+          "wifi_ssid": "要连接的 WiFi 网络名称。",
+          "wifi_password": "WiFi 网络的密码。",
+          "device_pop": "如果设备需要，请输入所有权证明码。"
+        }
+      },
+      "provisioning": {
+        "title": "正在配网设备",
+        "description": "正在向设备发送 WiFi 凭据并连接到云端...\n\n此过程可能需要最多 2 分钟，请耐心等待。"
+      },
+      "cloud_device_select": {
+        "title": "选择云端设备",
+        "description": "发现 {device_count} 个 ESP RainMaker 设备。选择一个添加。\n\n标记为「在线」的设备当前已连接到云端。",
+        "data": {
+          "selected_device": "设备"
+        },
+        "data_description": {
+          "selected_device": "选择要添加的 ESP RainMaker 设备。"
+        }
       },
       "pop_input": {
         "title": "需要安全认证",
@@ -42,7 +101,11 @@
       "cannot_connect": "无法连接到设备。",
       "timeout": "连接超时。",
       "invalid_auth": "认证失败。",
-      "invalid_device_selection": "无效的设备选择。"
+      "invalid_device_selection": "无效的设备选择。",
+      "rainmaker_not_logged_in": "未登录 RainMaker。请输入您的凭据。",
+      "rainmaker_login_failed": "RainMaker 认证失败。请检查您的凭据。",
+      "provisioning_failed": "设备配网失败。请确保设备处于配网模式后重试。",
+      "wifi_ssid_required": "WiFi 网络名称是必需的。"
     },
     "abort": {
       "already_configured": "设备已配置。",

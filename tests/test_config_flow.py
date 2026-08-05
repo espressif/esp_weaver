@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.esp_weaver.config_flow import (
     ESPWeaverConfigFlow,
@@ -27,6 +28,8 @@ from custom_components.esp_weaver.const import (
     STEP_DEVICE_SETUP,
     STEP_POP_INPUT,
 )
+from custom_components.esp_weaver.iot.cloud import CloudDeviceInfo
+from custom_components.esp_weaver.iot.cloud.rmaker_cli_client import BLEDeviceInfo
 from custom_components.esp_weaver.iot.entity_states import DiscoveredDevice
 from custom_components.esp_weaver.iot.specs.events import DOMAIN
 from custom_components.esp_weaver.iot.specs.keys import (
@@ -83,15 +86,30 @@ class TestESPWeaverConfigFlowInit:
 class TestAsyncStepUser:
     """Test the user-initiated config flow."""
 
+    async def test_user_step_shows_mode_selection(self, hass: HomeAssistant) -> None:
+        """Test user step shows connection mode selection form first."""
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_USER}
+        )
+
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "user"
+
     async def test_no_devices_found(self, hass: HomeAssistant) -> None:
-        """Test we handle no devices found."""
+        """Test we handle no devices found in local mode."""
         with patch(
             "custom_components.esp_weaver.config_flow.async_discover_devices",
             new_callable=AsyncMock,
             return_value=[],
         ):
+            # First, init flow to get mode selection
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": SOURCE_USER}
+            )
+            # Then submit local mode selection
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "local"},
             )
 
         assert result["type"] is FlowResultType.ABORT
@@ -122,7 +140,8 @@ class TestAsyncStepUser:
                 flow, "_get_existing_node_ids", return_value=existing_node_ids
             ),
         ):
-            result = await flow.async_step_user(None)
+            # Submit local mode selection to trigger device discovery
+            result = await flow.async_step_user({"connection_mode": "local"})
 
         assert result["type"] is FlowResultType.ABORT
         assert result["reason"] == ABORT_NO_NEW_DEVICES
@@ -150,8 +169,14 @@ class TestAsyncStepUser:
             )
             mock_manager_class.return_value = mock_manager
 
+            # First, init flow to get mode selection
             result = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": SOURCE_USER}
+            )
+            # Then submit local mode selection
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "local"},
             )
 
         assert result["type"] is FlowResultType.FORM
@@ -669,3 +694,1034 @@ class TestOptionsFlow:
 
         assert result["type"] is FlowResultType.ABORT
         assert result["reason"] == "no_options_available"
+
+
+# =============================================================================
+# Cloud Control Flow Tests
+# =============================================================================
+
+
+class TestCloudControlFlow:
+    """Test cloud control flow."""
+
+    async def test_cloud_mode_shows_login_form(self, hass: HomeAssistant) -> None:
+        """Test that selecting cloud mode shows RainMaker login form."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(
+                return_value={"logged_in": False}
+            )
+            mock_client_class.return_value = mock_client
+
+            # Init flow
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            # Select cloud mode
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "rainmaker_login"
+
+    async def test_cloud_login_success(self, hass: HomeAssistant) -> None:
+        """Test successful RainMaker login."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(
+                return_value={"logged_in": False}
+            )
+            mock_client.login = AsyncMock(return_value={"success": True})
+            mock_client.get_rainmaker_devices = AsyncMock(return_value=[])
+            mock_client_class.return_value = mock_client
+
+            # Init flow and select cloud mode
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            # Submit login
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "cloud_action_select"
+
+    async def test_cloud_login_failure(self, hass: HomeAssistant) -> None:
+        """Test failed RainMaker login."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(
+                return_value={"logged_in": False}
+            )
+            mock_client.login = AsyncMock(
+                return_value={"success": False, "error": "Invalid credentials"}
+            )
+            mock_client_class.return_value = mock_client
+
+            # Init flow and select cloud mode
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            # Submit invalid login
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "wrong_password"},
+            )
+
+            # Should show form again with error
+            assert result["type"] is FlowResultType.FORM
+            assert result["errors"]["base"] == "rainmaker_login_failed"
+
+    async def test_cloud_already_logged_in(self, hass: HomeAssistant) -> None:
+        """Test when already logged in to RainMaker."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(return_value=[])
+            mock_client_class.return_value = mock_client
+
+            # Init flow and select cloud mode
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            # Submit (even with credentials, should proceed since already logged in)
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "cloud_action_select"
+
+
+class TestCloudActionSelect:
+    """Test cloud action selection step."""
+
+    async def test_action_select_provision(self, hass: HomeAssistant) -> None:
+        """Test selecting provision action starts BLE scan."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[
+                    CloudDeviceInfo(
+                        node_id="ABC123",
+                        name="Test Device",
+                    )
+                ]
+            )
+            mock_client_class.return_value = mock_client
+
+            # Init flow and login
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            # Select provision action
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "ble_scan"
+
+    async def test_action_select_existing(self, hass: HomeAssistant) -> None:
+        """Test selecting existing action loads cloud devices."""
+
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[
+                    CloudDeviceInfo(
+                        node_id="ABC123",
+                        name="Test Device",
+                    )
+                ]
+            )
+            mock_client_class.return_value = mock_client
+
+            # Init flow and login
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            # Select existing action
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "existing"},
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "cloud_device_select"
+
+
+class TestLoadCloudDevices:
+    """Test _load_and_select_cloud_devices."""
+
+    async def test_no_cloud_devices(self, hass: HomeAssistant) -> None:
+        """Test abort when no cloud devices found."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(return_value=[])
+            mock_client_class.return_value = mock_client
+
+            # Init flow and login
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            # Select existing action - should abort because no devices
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "existing"},
+            )
+
+            assert result["type"] is FlowResultType.ABORT
+            assert result["reason"] == "no_devices_found"
+
+
+class TestBleScan:
+    """Test BLE scan step."""
+
+    async def test_ble_scan_valid_device_name(self, hass: HomeAssistant) -> None:
+        """Test valid device name proceeds to WiFi config."""
+
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[CloudDeviceInfo(node_id="ABC123", name="Test Device")]
+            )
+            mock_client_class.return_value = mock_client
+
+            # Init flow, login, select provision
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+            # Enter device name
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"device_name": "PROV_123456"},
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "wifi_config"
+
+    async def test_ble_scan_empty_device_name(self, hass: HomeAssistant) -> None:
+        """Test empty device name shows error."""
+
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[CloudDeviceInfo(node_id="ABC123", name="Test Device")]
+            )
+            mock_client_class.return_value = mock_client
+
+            # Init flow, login, select provision
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+            # Enter empty device name
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"device_name": ""},
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "ble_scan"
+            assert result["errors"]["base"] == "invalid_device_selection"
+
+    async def test_ble_scan_nonstandard_device_name(self, hass: HomeAssistant) -> None:
+        """Test BLE scan with non-standard device name (warns but proceeds)."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.login = AsyncMock(return_value={"success": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[CloudDeviceInfo(node_id="ABC123", name="Test Device")]
+            )
+            mock_client_class.return_value = mock_client
+
+            # Init flow, login, select provision
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+            # Enter non-standard device name (should warn but proceed)
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"device_name": "CUSTOM_DEVICE"},
+            )
+            # Should still proceed to wifi_config
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "wifi_config"
+
+
+class TestWifiConfig:
+    """Test WiFi configuration step."""
+
+    async def test_wifi_config_form_shown(self, hass: HomeAssistant) -> None:
+        """Test WiFi config form is shown after BLE scan."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.login = AsyncMock(return_value={"success": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[CloudDeviceInfo(node_id="ABC123", name="Test Device")]
+            )
+            mock_client_class.return_value = mock_client
+
+            # Init flow, login, select provision, enter device name
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"device_name": "PROV_123456"},
+            )
+            # Verify we reach the wifi_config step
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "wifi_config"
+
+
+class TestProvisioning:
+    """Test provisioning step."""
+
+    async def test_provisioning_failure(self, hass: HomeAssistant) -> None:
+        """Test failed provisioning shows error."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.login = AsyncMock(return_value={"success": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[CloudDeviceInfo(node_id="ABC123", name="Test Device")]
+            )
+            mock_client.provision_device = AsyncMock(
+                return_value={"success": False, "error": "BLE connection failed"}
+            )
+            mock_client_class.return_value = mock_client
+
+            # Init flow through to provisioning
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"device_name": "PROV_123456"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {
+                    "wifi_ssid": "TestWiFi",
+                    "wifi_password": "wifi_pass",
+                    "device_pop": "",
+                },
+            )
+
+            # Confirm provisioning
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {},
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["errors"]["base"] == "provisioning_failed"
+
+
+class TestCloudDeviceSelect:
+    """Test cloud device selection step."""
+
+    async def test_select_cloud_device_success(self, hass: HomeAssistant) -> None:
+        """Test selecting cloud device creates entry."""
+
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[
+                    CloudDeviceInfo(
+                        node_id="ABC123",
+                        name="Test Device",
+                        connected=True,
+                    )
+                ]
+            )
+            mock_client_class.return_value = mock_client
+
+            # Init flow through to device select
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "existing"},
+            )
+            # Select device
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"selected_device": "ABC123"},
+            )
+
+            assert result["type"] is FlowResultType.CREATE_ENTRY
+            assert result["data"]["node_id"] == "ABC123"
+            assert result["data"]["connection_mode"] == "cloud"
+            assert "Cloud" in result["title"]
+
+    async def test_select_invalid_cloud_device(self, hass: HomeAssistant) -> None:
+        """Test selecting invalid device shows error (device removed during selection).
+
+        The SelectSelector validates values against its options list before the
+        handler runs, so we call the step handler directly to simulate a race
+        condition where the device list changes between form display and submission.
+        """
+        flow = ESPWeaverConfigFlow()
+        flow.hass = hass
+
+        flow._cloud_devices = [
+            CloudDeviceInfo(node_id="ABC123", name="Test Device", connected=True)
+        ]
+
+        result = await flow.async_step_cloud_device_select(
+            {"selected_device": "NONEXISTENT_DEVICE"}
+        )
+
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"]["base"] == "invalid_device_selection"
+
+
+class TestCloudLoginEdgeCases:
+    """Test cloud login edge cases."""
+
+    async def test_cloud_login_no_credentials_via_direct_call(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Test cloud login when not logged in and no credentials provided.
+
+        Tests line 188: errors["base"] = ERROR_RAINMAKER_NOT_LOGGED_IN
+        """
+        flow = ESPWeaverConfigFlow()
+        flow.hass = hass
+
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(
+                return_value={"logged_in": False}
+            )
+            mock_client_class.return_value = mock_client
+
+            # Directly call the step with empty credentials
+            result = await flow.async_step_rainmaker_login(
+                user_input={"email": "", "password": ""}
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "rainmaker_login"
+            assert result["errors"]["base"] == "rainmaker_not_logged_in"
+
+
+class TestCloudDeviceLoadEdgeCases:
+    """Test cloud device loading edge cases."""
+
+    async def test_all_cloud_devices_already_configured(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Test when all cloud devices are already configured."""
+        # First, create an existing entry
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            data={"node_id": "ABC123", "connection_mode": "cloud"},
+            unique_id="ABC123",
+        )
+        entry.add_to_hass(hass)
+
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[
+                    CloudDeviceInfo(
+                        node_id="ABC123",  # Same as existing entry
+                        name="Test Device",
+                    )
+                ]
+            )
+            mock_client_class.return_value = mock_client
+
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "existing"},
+            )
+
+            assert result["type"] is FlowResultType.ABORT
+            assert result["reason"] == "no_new_devices_found"
+
+
+class TestWifiConfigEdgeCases:
+    """Test WiFi configuration edge cases."""
+
+    async def test_wifi_config_empty_ssid(self, hass: HomeAssistant) -> None:
+        """Test WiFi config with empty SSID shows error."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[CloudDeviceInfo(node_id="ABC123", name="Test Device")]
+            )
+            mock_client_class.return_value = mock_client
+
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"device_name": "PROV_123456"},
+            )
+            # Submit with empty ssid
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"wifi_ssid": "", "wifi_password": "pass", "device_pop": ""},
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "wifi_config"
+            assert result["errors"]["base"] == "wifi_ssid_required"
+
+
+class TestProvisioningSuccess:
+    """Test successful provisioning flow."""
+
+    async def test_provisioning_success_with_bound_device(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Test successful provisioning with bound device."""
+        with patch(
+            "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+        ) as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[CloudDeviceInfo(node_id="ABC123", name="Test Device")]
+            )
+            mock_client.provision_device = AsyncMock(
+                return_value={"success": True, "node_id": "NEW123", "bound": True}
+            )
+            mock_client_class.return_value = mock_client
+
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"device_name": "PROV_123456"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {
+                    "wifi_ssid": "TestWiFi",
+                    "wifi_password": "wifi_pass",
+                    "device_pop": "",
+                },
+            )
+
+            # After provisioning success, get_rainmaker_devices returns the new device
+            mock_client.get_rainmaker_devices = AsyncMock(
+                return_value=[
+                    CloudDeviceInfo(
+                        node_id="NEW123",
+                        name="Provisioned Device",
+                        connected=True,
+                    )
+                ]
+            )
+
+            # Trigger provisioning step
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {},
+            )
+
+            assert result["type"] is FlowResultType.CREATE_ENTRY
+            assert result["data"]["node_id"] == "NEW123"
+
+    async def test_provisioning_success_unbound_device(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Test provisioning success with unbound device that appears later."""
+        with (
+            patch(
+                "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+            ) as mock_client_class,
+            patch(
+                "custom_components.esp_weaver.config_flow.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(return_value=[])
+            mock_client.provision_device = AsyncMock(
+                return_value={"success": True, "node_id": "NEW123", "bound": False}
+            )
+            mock_client_class.return_value = mock_client
+
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"device_name": "PROV_123456"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {
+                    "wifi_ssid": "TestWiFi",
+                    "wifi_password": "wifi_pass",
+                    "device_pop": "",
+                },
+            )
+
+            # Simulate device appearing in cloud after first poll
+            call_count = 0
+
+            async def get_devices_side_effect():
+                nonlocal call_count
+                call_count += 1
+                if call_count >= 2:
+                    return [
+                        CloudDeviceInfo(
+                            node_id="NEW123",
+                            name="New Device",
+                            connected=True,
+                        )
+                    ]
+                return []
+
+            mock_client.get_rainmaker_devices = AsyncMock(
+                side_effect=get_devices_side_effect
+            )
+
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {},
+            )
+
+            assert result["type"] is FlowResultType.CREATE_ENTRY
+            assert result["data"]["node_id"] == "NEW123"
+
+    async def test_provisioning_device_not_found_in_cloud(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Test provisioning when device never appears in cloud."""
+        with (
+            patch(
+                "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+            ) as mock_client_class,
+            patch(
+                "custom_components.esp_weaver.config_flow.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            # Always return empty list - device never appears
+            mock_client.get_rainmaker_devices = AsyncMock(return_value=[])
+            mock_client.provision_device = AsyncMock(
+                return_value={"success": True, "node_id": "NEW123", "bound": False}
+            )
+            mock_client_class.return_value = mock_client
+
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"device_name": "PROV_123456"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {
+                    "wifi_ssid": "TestWiFi",
+                    "wifi_password": "wifi_pass",
+                    "device_pop": "",
+                },
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {},
+            )
+
+            assert result["type"] is FlowResultType.FORM
+            assert result["step_id"] == "provisioning"
+            assert result["errors"]["base"] == "provisioning_failed"
+
+    async def test_provisioning_multiple_new_devices_no_node_id(
+        self, hass: HomeAssistant
+    ) -> None:
+        """Test provisioning when multiple new devices appear without node_id."""
+        with (
+            patch(
+                "custom_components.esp_weaver.config_flow.RainMakerCLIClient"
+            ) as mock_client_class,
+            patch(
+                "custom_components.esp_weaver.config_flow.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+        ):
+            mock_client = MagicMock()
+            mock_client.check_login_status = AsyncMock(return_value={"logged_in": True})
+            mock_client.get_rainmaker_devices = AsyncMock(return_value=[])
+            # Provisioning succeeds but without node_id
+            mock_client.provision_device = AsyncMock(
+                return_value={"success": True, "node_id": None, "bound": False}
+            )
+            mock_client_class.return_value = mock_client
+
+            result = await hass.config_entries.flow.async_init(
+                DOMAIN, context={"source": SOURCE_USER}
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"connection_mode": "cloud"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"email": "test@example.com", "password": "password123"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"action": "provision"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {"device_name": "PROV_123456"},
+            )
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {
+                    "wifi_ssid": "TestWiFi",
+                    "wifi_password": "wifi_pass",
+                    "device_pop": "",
+                },
+            )
+
+            # Multiple new devices appear (simulates edge case)
+            call_count = 0
+
+            async def get_devices_multi():
+                nonlocal call_count
+                call_count += 1
+                if call_count >= 2:
+                    return [
+                        CloudDeviceInfo(node_id="DEV1", name="Device 1"),
+                        CloudDeviceInfo(node_id="DEV2", name="Device 2"),
+                    ]
+                return []
+
+            mock_client.get_rainmaker_devices = AsyncMock(side_effect=get_devices_multi)
+
+            result = await hass.config_entries.flow.async_configure(
+                result["flow_id"],
+                {},
+            )
+
+            # Should select first device when multiple found without node_id
+            assert result["type"] is FlowResultType.CREATE_ENTRY
+            assert result["data"]["node_id"] == "DEV1"
+
+
+class TestDirectFlowCalls:
+    """Test direct flow method calls for edge cases."""
+
+    async def test_load_cloud_devices_no_client(self, hass: HomeAssistant) -> None:
+        """Test _load_and_select_cloud_devices when cli_client is None."""
+        flow = ESPWeaverConfigFlow()
+        flow.hass = hass
+        flow._cli_client = None  # No client
+
+        result = await flow._load_and_select_cloud_devices()
+
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "rainmaker_not_logged_in"
+
+    async def test_ble_scan_no_client(self, hass: HomeAssistant) -> None:
+        """Test async_step_ble_scan when cli_client is None."""
+        flow = ESPWeaverConfigFlow()
+        flow.hass = hass
+        flow._cli_client = None  # No client
+
+        result = await flow.async_step_ble_scan(user_input=None)
+
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "rainmaker_not_logged_in"
+
+    async def test_provisioning_no_client_or_device(self, hass: HomeAssistant) -> None:
+        """Test async_step_provisioning when cli_client or ble_device is None."""
+        flow = ESPWeaverConfigFlow()
+        flow.hass = hass
+        flow._cli_client = None  # No client
+        flow._selected_ble_device = None  # No device
+
+        result = await flow.async_step_provisioning(user_input=None)
+
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "invalid_device_selection"
+
+    async def test_load_cloud_devices_api_exception(self, hass: HomeAssistant) -> None:
+        """Test _load_and_select_cloud_devices when API raises exceptions."""
+        flow = ESPWeaverConfigFlow()
+        flow.hass = hass
+
+        mock_client = MagicMock()
+        mock_client.get_rainmaker_devices = AsyncMock(
+            side_effect=RuntimeError("API timeout")
+        )
+        flow._cli_client = mock_client
+
+        with patch(
+            "custom_components.esp_weaver.config_flow.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            result = await flow._load_and_select_cloud_devices()
+
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "no_devices_found"
+
+    async def test_provisioning_back_action(self, hass: HomeAssistant) -> None:
+        """Test provisioning step returns to wifi_config on back action."""
+        flow = ESPWeaverConfigFlow()
+        flow.hass = hass
+
+        flow._cli_client = MagicMock()
+        flow._selected_ble_device = BLEDeviceInfo(name="PROV_123456")
+
+        result = await flow.async_step_provisioning(user_input={"action": "back"})
+
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "wifi_config"
+
+    async def test_provisioning_poll_api_exception(self, hass: HomeAssistant) -> None:
+        """Test provisioning polling when get_rainmaker_devices raises."""
+        flow = ESPWeaverConfigFlow()
+        flow.hass = hass
+
+        mock_client = MagicMock()
+        mock_client.provision_device = AsyncMock(
+            return_value={"success": True, "node_id": "NEW123", "bound": False}
+        )
+        mock_client.get_rainmaker_devices = AsyncMock(
+            side_effect=RuntimeError("Cloud API error")
+        )
+        flow._cli_client = mock_client
+        flow._selected_ble_device = BLEDeviceInfo(name="PROV_123456")
+        flow._wifi_ssid = "TestWiFi"
+        flow._wifi_password = "pass"
+        flow._device_pop = ""
+
+        with patch(
+            "custom_components.esp_weaver.config_flow.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            result = await flow.async_step_provisioning(user_input=None)
+
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "provisioning"
+        assert result["errors"]["base"] == "provisioning_failed"

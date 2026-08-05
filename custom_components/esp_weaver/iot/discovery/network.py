@@ -305,6 +305,15 @@ class GlobalMDNSListener(BaseMDNSListener):
             )
             return
 
+        # Skip local connection attempts for cloud-controlled devices.
+        # They use cloud API for control; connecting locally with the
+        # placeholder security_version=0 would cause a security mismatch.
+        if self.api.is_cloud_device(node_id):
+            _LOGGER.debug(
+                "Device %s is cloud-controlled, skipping local connection", node_id
+            )
+            return
+
         _LOGGER.debug(
             "mDNS %s event for configured device %s at %s:%s",
             change_type,

@@ -14,7 +14,7 @@ Type Definitions:
 - DeviceProperty: Type for individual device property entries
 """
 
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from homeassistant.config_entries import ConfigEntry
 
@@ -43,6 +43,8 @@ class ESPConfigEntryData(TypedDict, total=False):
         node_id: Unique device identifier.
         custom_pop: Proof of Possession for security authentication.
         security_version: Security protocol version (0=none, 1=PoP required, 2=SRP6a).
+        connection_mode: Connection mode ("local" or "cloud").
+        rainmaker_region: RainMaker region ("global" or "china").
     """
 
     host: str
@@ -50,6 +52,8 @@ class ESPConfigEntryData(TypedDict, total=False):
     node_id: str
     custom_pop: str
     security_version: int
+    connection_mode: Literal["local", "cloud"]
+    rainmaker_region: Literal["global", "china"]
 
 
 # Device Property Types

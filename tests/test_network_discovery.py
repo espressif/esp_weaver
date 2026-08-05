@@ -380,6 +380,7 @@ class TestGlobalMDNSListener:
         ]
         # Device is not connected (no active client)
         mock_api.registry.get_client.return_value = None
+        mock_api.is_cloud_device.return_value = False
         listener = GlobalMDNSListener(mock_hass_with_config_entries, api=mock_api)
 
         await listener._async_process_service(
@@ -399,6 +400,7 @@ class TestGlobalMDNSListener:
         ]
         # Device is connected (has active client)
         mock_api.registry.get_client.return_value = MagicMock()
+        mock_api.is_cloud_device.return_value = False
         mock_device = MagicMock()
         mock_device.ip = "192.168.1.50"
         mock_device.port = 8080
@@ -426,6 +428,7 @@ class TestGlobalMDNSListener:
         ]
         # Device is connected (has active client)
         mock_api.registry.get_client.return_value = MagicMock()
+        mock_api.is_cloud_device.return_value = False
         mock_device = MagicMock()
         mock_device.ip = "192.168.1.100"
         mock_device.port = 8080

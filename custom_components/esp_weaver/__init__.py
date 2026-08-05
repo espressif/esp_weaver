@@ -22,13 +22,22 @@ from .coordinator import ESPDataUpdateCoordinator
 from .helpers.event_dispatcher import create_event_dispatcher
 from .helpers.ha_types import ESPConfigEntry
 from .iot.client.device_api import ESPWeaverApi
+from .iot.cloud import RainMakerCLIClient
 from .iot.specs.device_specs import (
     DEFAULT_DEVICE_NAME_PREFIX,
     DEFAULT_MANUFACTURER,
     DEFAULT_PORT,
 )
 from .iot.specs.events import DOMAIN
-from .iot.specs.keys import CONF_NODE_ID, KEY_API
+from .iot.specs.keys import (
+    CONF_CONNECTION_MODE,
+    CONF_NODE_ID,
+    CONF_RAINMAKER_REGION,
+    CONNECTION_MODE_CLOUD,
+    CONNECTION_MODE_LOCAL,
+    KEY_API,
+    RAINMAKER_REGION_GLOBAL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,41 +82,98 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 async def async_setup_entry(hass: HomeAssistant, entry: ESPConfigEntry) -> bool:
     """Set up ESP-Weaver device from a config entry."""
     node_id = entry.data.get(CONF_NODE_ID)
+    connection_mode = entry.data.get(CONF_CONNECTION_MODE, CONNECTION_MODE_LOCAL)
+
+    if not node_id:
+        _LOGGER.error("Missing required config: node_id=%s", node_id)
+        return False
+
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    api = await _get_or_create_api(hass, domain_data)
+
+    if connection_mode == CONNECTION_MODE_CLOUD:
+        return await _setup_cloud_device(hass, entry, api, node_id, domain_data)
+
+    return await _setup_local_device(hass, entry, api, node_id)
+
+
+async def _setup_cloud_device(
+    hass: HomeAssistant,
+    entry: ESPConfigEntry,
+    api: ESPWeaverApi,
+    node_id: str,
+    domain_data: dict[str, Any],
+) -> bool:
+    """Set up a cloud-controlled device."""
+    cloud_client = await _get_or_create_cli_client(domain_data, entry)
+    if cloud_client is None:
+        raise ConfigEntryNotReady("Failed to create RainMaker CLI client")
+
+    api.set_cloud_client(node_id, cloud_client)
+    api.register_config_entry(node_id, entry.entry_id, CONNECTION_MODE_CLOUD)
+
+    coordinator = _create_coordinator(hass, api, node_id, entry)
+    _register_device(hass, entry, node_id, is_cloud=True)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _setup_discovery_listeners(hass, node_id, entry)
+
+    api.register_cloud_device(node_id)
+
+    # Let ConfigEntryNotReady propagate so HA retries setup with backoff.
+    # Cloud discovery failures are handled gracefully inside the coordinator:
+    # _async_update_data returns CoordinatorData(available=False) for the first
+    # few attempts, only raising UpdateFailed after CLOUD_DISCOVERY_FAILURE_THRESHOLD.
+    await coordinator.async_config_entry_first_refresh()
+
+    return True
+
+
+async def _get_or_create_cli_client(
+    domain_data: dict[str, Any],
+    entry: ESPConfigEntry,
+) -> RainMakerCLIClient | None:
+    """Get existing CLI client or create a new one."""
+    region = entry.data.get(CONF_RAINMAKER_REGION, RAINMAKER_REGION_GLOBAL)
+    cli_key = f"cli_client_{region}"
+
+    if cli_key in domain_data:
+        client: RainMakerCLIClient = domain_data[cli_key]
+        return client
+
+    client = RainMakerCLIClient(region=region)
+
+    # Verify we can get a session
+    if not await client.check_health():
+        _LOGGER.error(
+            "Failed to connect to RainMaker for region %s. Please re-login.",
+            region,
+        )
+        return None
+
+    domain_data[cli_key] = client
+    return client
+
+
+async def _setup_local_device(
+    hass: HomeAssistant,
+    entry: ESPConfigEntry,
+    api: ESPWeaverApi,
+    node_id: str,
+) -> bool:
+    """Set up a locally-controlled device."""
     host = entry.data.get(CONF_HOST)
 
-    if not node_id or not host:
-        _LOGGER.error("Missing required config: node_id=%s, host=%s", node_id, host)
+    if not host:
+        _LOGGER.error("Missing required config for local device: host=%s", host)
         return False
 
     port = entry.data.get(CONF_PORT, DEFAULT_PORT)
 
-    # Initialize domain data structure
-    domain_data = hass.data.setdefault(DOMAIN, {})
+    api.register_config_entry(node_id, entry.entry_id, CONNECTION_MODE_LOCAL)
 
-    # Validation passed, now create/get API
-    # Initialize or reuse shared API
-    api = await _get_or_create_api(hass, domain_data)
-
-    # Register config entry with API first (for proper association)
-    api.register_config_entry(node_id, entry.entry_id)
-
-    # Create coordinator
-    coordinator = ESPDataUpdateCoordinator(
-        hass=hass,
-        api=api,
-        node_id=node_id,
-        device_name=entry.title,
-        config_entry=entry,
-    )
-    entry.runtime_data = coordinator
-
-    # Register device in Home Assistant device registry
+    coordinator = _create_coordinator(hass, api, node_id, entry)
     _register_device(hass, entry, node_id, host, port)
-
-    # Setup platforms (registers discovery listeners)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    # Setup discovery listeners for additional entity types
     _setup_discovery_listeners(hass, node_id, entry)
 
     # Start mDNS services AFTER platforms are set up
@@ -152,6 +218,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ESPConfigEntry) -> bool:
     return True
 
 
+def _create_coordinator(
+    hass: HomeAssistant,
+    api: ESPWeaverApi,
+    node_id: str,
+    entry: ESPConfigEntry,
+) -> ESPDataUpdateCoordinator:
+    """Create coordinator and bind it to the config entry."""
+    coordinator = ESPDataUpdateCoordinator(
+        hass=hass,
+        api=api,
+        node_id=node_id,
+        device_name=entry.title,
+        config_entry=entry,
+    )
+    entry.runtime_data = coordinator
+    return coordinator
+
+
 async def _get_or_create_api(
     hass: HomeAssistant,
     domain_data: dict[str, Any],
@@ -161,7 +245,6 @@ async def _get_or_create_api(
         existing_api: ESPWeaverApi = domain_data[KEY_API]
         return existing_api
 
-    # Create event dispatcher and inject into API
     event_dispatcher = create_event_dispatcher(hass)
     api = ESPWeaverApi(hass, DOMAIN, event_dispatcher=event_dispatcher)
     domain_data[KEY_API] = api
@@ -172,19 +255,25 @@ def _register_device(
     hass: HomeAssistant,
     entry: ConfigEntry,
     node_id: str,
-    host: str,
-    port: int,
+    host: str = "",
+    port: int = 0,
+    *,
+    is_cloud: bool = False,
 ) -> None:
     """Register device in Home Assistant device registry."""
     device_registry = dr.async_get(hass)
+    model_suffix = " (Cloud)" if is_cloud else ""
+    configuration_url = None
+    if not is_cloud and host and port > 0:
+        configuration_url = f"http://{host}:{port}"
 
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, node_id)},
         name=entry.title,
         manufacturer=DEFAULT_MANUFACTURER,
-        model=f"{DEFAULT_DEVICE_NAME_PREFIX}{node_id}",
-        configuration_url=f"http://{host}:{port}",
+        model=f"{DEFAULT_DEVICE_NAME_PREFIX}{node_id}{model_suffix}",
+        configuration_url=configuration_url,
     )
 
 
@@ -256,9 +345,9 @@ async def async_remove_config_entry_device(
     domain_data = hass.data.get(DOMAIN, {})
     api = domain_data.get(KEY_API)
 
-    # Check if device is currently available
+    # Check if device is currently available (use async for cloud online check)
     if api and node_id:
-        is_available = api.is_device_available(node_id)
+        is_available = await api.is_device_available_async(node_id)
         if is_available:
             # Device is still connected, don't allow removal
             _LOGGER.warning(

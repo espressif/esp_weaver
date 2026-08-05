@@ -214,9 +214,7 @@ class ThresholdManager:
                 return
 
             try:
-                success = await api_instance.set_local_ctrl_property(
-                    node_id, param_name, value
-                )
+                success = await api_instance.set_property(node_id, param_name, value)
             except (OSError, TimeoutError, ConnectionError, RuntimeError) as err:
                 _LOGGER.error(
                     "Error sending threshold to device: node=%s, param=%s: %s",

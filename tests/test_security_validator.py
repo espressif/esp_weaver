@@ -4,6 +4,7 @@
 
 """Test the security_validator module."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -330,3 +331,151 @@ class TestPopConnection:
 
         assert result is False
         mock_transport.close.assert_called_once()
+
+
+class TestDetectSecurityWithSecVer:
+    """Test detect_device_security with sec_ver field from device."""
+
+    @pytest.fixture
+    def manager(self) -> ESPSecurityManager:
+        """Create a security manager with mocked module."""
+        mock_module = MagicMock()
+        mock_module.get_transport = AsyncMock()
+        mock_module.has_capability = AsyncMock()
+        return ESPSecurityManager(mock_module)
+
+    @pytest.mark.asyncio
+    async def test_sec_ver_0_from_device(self, manager: ESPSecurityManager) -> None:
+        """Test detecting security version 0 from device sec_ver field."""
+        mock_transport = MagicMock()
+        # Device reports sec_ver: 0 in version response
+        version_response = json.dumps({"local_ctrl": {"sec_ver": 0}})
+        mock_transport.send_data = AsyncMock(return_value=version_response)
+        manager._local_ctrl.get_transport.return_value = mock_transport
+
+        result = await manager.detect_device_security("192.168.1.100", 8080)
+
+        assert result["security_version"] == 0
+        assert result["pop_required"] is False
+
+    @pytest.mark.asyncio
+    async def test_sec_ver_1_with_no_pop_capability(
+        self, manager: ESPSecurityManager
+    ) -> None:
+        """Test detecting security version 1 with no_pop capability from sec_ver."""
+        mock_transport = MagicMock()
+        version_response = json.dumps({"local_ctrl": {"sec_ver": 1}})
+        mock_transport.send_data = AsyncMock(return_value=version_response)
+        manager._local_ctrl.get_transport.return_value = mock_transport
+        # has_capability returns True for no_pop
+        manager._local_ctrl.has_capability = AsyncMock(return_value=True)
+
+        result = await manager.detect_device_security("192.168.1.100", 8080)
+
+        assert result["security_version"] == 1
+        assert result["pop_required"] is False
+
+    @pytest.mark.asyncio
+    async def test_sec_ver_1_without_no_pop_capability(
+        self, manager: ESPSecurityManager
+    ) -> None:
+        """Test detecting security version 1 without no_pop capability from sec_ver."""
+        mock_transport = MagicMock()
+        version_response = json.dumps({"local_ctrl": {"sec_ver": 1}})
+        mock_transport.send_data = AsyncMock(return_value=version_response)
+        manager._local_ctrl.get_transport.return_value = mock_transport
+        # has_capability returns False for no_pop
+        manager._local_ctrl.has_capability = AsyncMock(return_value=False)
+
+        result = await manager.detect_device_security("192.168.1.100", 8080)
+
+        assert result["security_version"] == 1
+        assert result["pop_required"] is True
+
+    @pytest.mark.asyncio
+    async def test_query_security_oserror(self, manager: ESPSecurityManager) -> None:
+        """Test detect_device_security handles OSError during query."""
+        mock_transport = MagicMock()
+        mock_transport.send_data = AsyncMock(side_effect=OSError("Query failed"))
+        manager._local_ctrl.get_transport.return_value = mock_transport
+
+        result = await manager.detect_device_security("192.168.1.100", 8080)
+
+        # Fail-secure: assume security is required
+        assert result == {"security_version": 1, "pop_required": True}
+
+    @pytest.mark.asyncio
+    async def test_query_security_runtime_error(
+        self, manager: ESPSecurityManager
+    ) -> None:
+        """Test detect_device_security handles RuntimeError during query."""
+        mock_transport = MagicMock()
+        mock_transport.send_data = AsyncMock(side_effect=RuntimeError("Protocol error"))
+        manager._local_ctrl.get_transport.return_value = mock_transport
+
+        result = await manager.detect_device_security("192.168.1.100", 8080)
+
+        assert result == {"security_version": 1, "pop_required": True}
+
+    @pytest.mark.asyncio
+    async def test_transport_close_is_coroutine(
+        self, manager: ESPSecurityManager
+    ) -> None:
+        """Test transport.close() when it returns a coroutine."""
+        mock_transport = MagicMock()
+        mock_transport.send_data = AsyncMock(return_value="{}")
+        # close() returns a coroutine
+        mock_transport.close = AsyncMock()
+        manager._local_ctrl.get_transport.return_value = mock_transport
+        manager._local_ctrl.has_capability = AsyncMock(side_effect=[True, True])
+
+        await manager.detect_device_security("192.168.1.100", 8080)
+
+        mock_transport.close.assert_awaited_once()
+
+
+class TestPopConnectionSecurityNotCached:
+    """Test test_pop_connection when security info not cached."""
+
+    @pytest.mark.asyncio
+    async def test_pop_connection_security_not_cached(self) -> None:
+        """Test test_pop_connection raises ValueError when security not cached."""
+        mock_module = MagicMock()
+        manager = ESPSecurityManager(mock_module)
+
+        # No cached security info
+        with (
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            pytest.raises(ValueError, match="Security info not cached"),
+        ):
+            await manager.test_pop_connection("192.168.1.100", "test_pop", 8080)
+
+
+class TestPopConnectionTransportCloseCoroutine:
+    """Test test_pop_connection transport.close() as coroutine."""
+
+    @pytest.mark.asyncio
+    async def test_transport_close_is_coroutine(self) -> None:
+        """Test transport.close() when it returns a coroutine in test_pop_connection."""
+        mock_module = MagicMock()
+        mock_module.get_transport = AsyncMock()
+        mock_module.get_security = MagicMock()
+        mock_module.establish_session = AsyncMock()
+        manager = ESPSecurityManager(mock_module)
+        manager._cached_security_info[("192.168.1.100", 8080)] = {
+            "security_version": 1,
+            "pop_required": True,
+        }
+
+        mock_transport = MagicMock()
+        # close() returns a coroutine
+        mock_transport.close = AsyncMock()
+        mock_module.get_transport.return_value = mock_transport
+        mock_module.get_security.return_value = MagicMock()
+        mock_module.establish_session.return_value = True
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await manager.test_pop_connection("192.168.1.100", "pop", 8080)
+
+        assert result is True
+        mock_transport.close.assert_awaited_once()

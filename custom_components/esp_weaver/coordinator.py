@@ -21,10 +21,14 @@ from .const import (
     CACHE_LIGHTS,
     CACHE_NUMBERS,
     CACHE_SENSORS,
+    CLOUD_CONNECTIVITY_CHECK_POLLS,
+    CLOUD_DISCOVERY_FAILURE_THRESHOLD,
+    CLOUD_PARAMS_FAILURE_THRESHOLD,
     DEFAULT_UPDATE_INTERVAL_SECONDS,
     MAX_CONSECUTIVE_FAILURES,
     RECONNECT_DELAYS,
 )
+from .helpers.event_dispatcher import fire_property_events
 from .helpers.ha_types import CoordinatorData
 from .iot.specs.events import DOMAIN, EVENT_CONNECTION_ERROR
 from .iot.specs.keys import CONF_NODE_ID, KEY_IP, KEY_PORT
@@ -91,6 +95,11 @@ class ESPDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._reconnect_attempt = 0
         self._reconnect_in_progress = False
         self._reconnect_task: asyncio.Task[bool] | None = None
+
+        self._cloud_params_failures = 0
+        self._cloud_poll_count = 0
+        self._cloud_device_offline = False
+        self._cloud_discovery_failures = 0
 
         super().__init__(
             hass,
@@ -182,21 +191,56 @@ class ESPDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             UpdateFailed: If device becomes unavailable after multiple failures.
         """
         try:
-            is_available = await self.api.is_device_available_async(self.node_id)
+            is_cloud = self.api.is_cloud_device(self.node_id)
 
-            if not is_available:
-                return await self._handle_device_offline()
+            if not is_cloud:
+                is_available = await self.api.is_device_available_async(self.node_id)
+                if not is_available:
+                    return await self._handle_device_offline()
 
-            # Fetch properties only if discovery not yet completed
-            # Discovery state is managed by API layer (single source of truth)
-            if not self.api.is_discovery_completed(self.node_id):
-                properties = await self._fetch_device_properties()
+            discovery_done = self.api.is_discovery_completed(self.node_id)
+            just_discovered = False
 
-                if properties:
-                    await self._perform_initial_discovery(properties)
+            if not discovery_done:
+                if is_cloud:
+                    await self._discover_cloud_device()
+                else:
+                    await self._discover_local_device()
+                just_discovered = self.api.is_discovery_completed(self.node_id)
+                discovery_done = just_discovered
 
-            # Reset failure counter on successful update
+            if is_cloud and not discovery_done:
+                self._cloud_discovery_failures += 1
+                if self._cloud_discovery_failures >= CLOUD_DISCOVERY_FAILURE_THRESHOLD:
+                    raise UpdateFailed(
+                        f"Cloud device {self.node_id}: config not available "
+                        f"after {self._cloud_discovery_failures} attempts"
+                    )
+                _LOGGER.debug(
+                    "Cloud discovery pending for %s (%d/%d)",
+                    self.node_id,
+                    self._cloud_discovery_failures,
+                    CLOUD_DISCOVERY_FAILURE_THRESHOLD,
+                )
+                return CoordinatorData(
+                    node_id=self.node_id,
+                    device_name=self.device_name,
+                    available=False,
+                )
+
+            if discovery_done and is_cloud and not just_discovered:
+                if not await self._poll_cloud_device_state():
+                    self._set_available(False)
+                    return CoordinatorData(
+                        node_id=self.node_id,
+                        device_name=self.device_name,
+                        available=False,
+                    )
+
+            # Reset failure counters on successful update
             self._consecutive_failures = 0
+            if is_cloud:
+                self._cloud_discovery_failures = 0
             self._set_available(True)
 
             return CoordinatorData(
@@ -227,16 +271,16 @@ class ESPDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             )
 
     async def _handle_device_offline(self) -> CoordinatorData:
-        """Handle device being offline.
+        """Handle local device being offline.
 
         Marks device as unavailable and schedules reconnection in background.
+        Only called for local devices; cloud devices use periodic polling.
 
         Returns:
             CoordinatorData indicating device is unavailable.
         """
         self._set_available(False)
 
-        # Schedule reconnection in background (non-blocking)
         if not self._reconnect_in_progress:
             self._schedule_reconnection()
 
@@ -342,34 +386,100 @@ class ESPDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 err,
             )
 
-    async def _fetch_device_properties(self) -> list[dict[str, Any]] | None:
-        """Fetch device properties.
-
-        Returns:
-            List of property dictionaries or None if fetch failed.
-        """
+    async def _discover_local_device(self) -> None:
+        """Fetch properties from local device and perform entity discovery."""
         client = self.api.registry.get_client(self.node_id)
         if client is None:
-            return None
+            return
 
-        return await client.get_property_values()
+        properties = await client.get_property_values()
+        if not properties:
+            return
 
-    async def _perform_initial_discovery(
-        self, properties: list[dict[str, Any]]
-    ) -> None:
-        """Perform initial entity discovery.
+        await self.api.parse_and_discover_entities(
+            self.node_id,
+            properties,
+            preferred_device_name=self.device_name,
+        )
+        self.api.mark_discovery_completed(self.node_id)
 
-        Args:
-            properties: List of device properties.
+    async def _discover_cloud_device(self) -> None:
+        """Fetch config from cloud and perform entity discovery."""
+        node_config = await self.api.get_cloud_node_config(self.node_id)
+        if not node_config or "devices" not in node_config:
+            _LOGGER.debug("Cloud discovery: no config for %s yet", self.node_id)
+            return
+
+        cloud_params = await self.api.get_cloud_params(self.node_id)
+        await self.api.discover_from_cloud(
+            self.node_id, node_config, cloud_params or {}, self.device_name
+        )
+        self.api.mark_discovery_completed(self.node_id)
+
+    async def _poll_cloud_device_state(self) -> bool:
+        """Poll cloud device state and fire update events.
+
+        Returns:
+            True if device is reachable, False if unavailable.
         """
-        # Discovery state is managed by API layer (single source of truth)
-        if not self.api.is_discovery_completed(self.node_id):
-            await self.api.parse_and_discover_entities(
+        self._cloud_poll_count += 1
+        if (
+            self._cloud_device_offline
+            or self._cloud_poll_count >= CLOUD_CONNECTIVITY_CHECK_POLLS
+        ):
+            self._cloud_poll_count = 0
+            if not await self._check_cloud_connectivity():
+                return False
+
+        params = await self.api.get_cloud_params(self.node_id)
+        if not params:
+            self._cloud_params_failures += 1
+            if self._cloud_params_failures >= CLOUD_PARAMS_FAILURE_THRESHOLD:
+                _LOGGER.warning(
+                    "Cloud device %s: %d consecutive param failures, "
+                    "marking unavailable",
+                    self.node_id,
+                    self._cloud_params_failures,
+                )
+                return False
+            _LOGGER.debug(
+                "No cloud params for %s (%d/%d)",
                 self.node_id,
-                properties,
-                preferred_device_name=self.device_name,
+                self._cloud_params_failures,
+                CLOUD_PARAMS_FAILURE_THRESHOLD,
             )
-            self.api.mark_discovery_completed(self.node_id)
+            return True
+
+        self._cloud_params_failures = 0
+        fire_property_events(self.hass, self.node_id, params)
+        return True
+
+    async def _check_cloud_connectivity(self) -> bool:
+        """Check if cloud device is connected via RainMaker API.
+
+        Returns:
+            True if device is reachable, False if unavailable.
+        """
+        connectivity = await self.api.is_cloud_device_online(self.node_id)
+
+        if connectivity is None:
+            _LOGGER.warning(
+                "Cloud device %s not found in RainMaker account", self.node_id
+            )
+            self._cloud_device_offline = True
+            return False
+
+        if not connectivity:
+            if not self._cloud_device_offline:
+                _LOGGER.info("Cloud device %s is offline", self.node_id)
+            self._cloud_device_offline = True
+            return False
+
+        if self._cloud_device_offline:
+            _LOGGER.info("Cloud device %s is back online", self.node_id)
+        self._cloud_device_offline = False
+        self._cloud_params_failures = 0
+        return True
 
     @property
     def is_available(self) -> bool:

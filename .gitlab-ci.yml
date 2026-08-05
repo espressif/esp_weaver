@@ -35,7 +35,11 @@ cache:
     - python3 -m venv .venv
     - source .venv/bin/activate
     - pip install --upgrade pip wheel setuptools
-    - pip install -r requirements_test.txt
+    # Use legacy resolver if backtracking resolver hits resolution-too-deep
+    - pip install -r requirements_test.txt || pip install --use-deprecated=legacy-resolver -r requirements_test.txt
+    # Install esp-rainmaker-cli without deps to avoid cryptography version conflict
+    # (esp-secure-cert-tool>=2.0.0 is already installed from requirements_test.txt)
+    - pip install esp-rainmaker-cli --no-deps -q
 
 # =============================================================================
 # Stage: Validate

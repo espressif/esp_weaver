@@ -44,6 +44,11 @@ RECONNECT_DELAYS: Final[tuple[int, ...]] = (1, 2, 4, 8, 16, 30)
 MAX_CONSECUTIVE_FAILURES: Final = 3
 DEFAULT_GESTURE_DISPLAY_DURATION: Final = 2.0
 
+# Cloud device availability
+CLOUD_CONNECTIVITY_CHECK_POLLS: Final = 5  # Check connectivity every 5th poll (~5 min)
+CLOUD_PARAMS_FAILURE_THRESHOLD: Final = 3
+CLOUD_DISCOVERY_FAILURE_THRESHOLD: Final = 3
+
 
 # =============================================================================
 # PLATFORM IDENTIFIERS
@@ -106,10 +111,20 @@ ERROR_POP_REQUIRED: Final = "pop_required"
 ERROR_INVALID_POP: Final = "invalid_pop"
 ERROR_INVALID_DEVICE: Final = "invalid_device_selection"
 ERROR_CANNOT_CONNECT: Final = "cannot_connect"
+ERROR_RAINMAKER_NOT_LOGGED_IN: Final = "rainmaker_not_logged_in"
+ERROR_RAINMAKER_LOGIN_FAILED: Final = "rainmaker_login_failed"
+ERROR_PROVISIONING_FAILED: Final = "provisioning_failed"
+ERROR_WIFI_SSID_REQUIRED: Final = "wifi_ssid_required"
 ABORT_NO_DEVICES: Final = "no_devices_found"
 ABORT_NO_NEW_DEVICES: Final = "no_new_devices_found"
 STEP_DEVICE_SETUP: Final = "device_setup"
 STEP_POP_INPUT: Final = "pop_input"
+STEP_CLOUD_DEVICE_SELECT: Final = "cloud_device_select"
+STEP_RAINMAKER_LOGIN: Final = "rainmaker_login"
+STEP_CLOUD_ACTION_SELECT: Final = "cloud_action_select"
+STEP_BLE_SCAN: Final = "ble_scan"
+STEP_WIFI_CONFIG: Final = "wifi_config"
+STEP_PROVISIONING: Final = "provisioning"
 FIELD_SELECTED_DEVICE: Final = "selected_device"
 PLACEHOLDER_DEVICE_COUNT: Final = "device_count"
 PLACEHOLDER_DEVICE_NAME: Final = "device_name"

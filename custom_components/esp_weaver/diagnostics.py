@@ -275,7 +275,7 @@ async def async_get_config_entry_diagnostics(
 
         diagnostics_data[DIAG_API_STATUS] = {
             DIAG_DEVICE_REGISTERED: node_id in api.devices,
-            DIAG_DEVICE_AVAILABLE: api.is_device_available(node_id),
+            DIAG_DEVICE_AVAILABLE: await api.is_device_available_async(node_id),
             DIAG_DISCOVERY_COMPLETED: api.is_discovery_completed(node_id),
         }
 
@@ -325,7 +325,7 @@ async def async_get_device_diagnostics(
         api = coordinator.api
 
         diagnostics_data[DIAG_CONNECTIVITY] = {
-            DIAG_AVAILABLE: api.is_device_available(node_id),
+            DIAG_AVAILABLE: await api.is_device_available_async(node_id),
             DIAG_COORDINATOR_AVAILABLE: coordinator.is_available,
         }
 

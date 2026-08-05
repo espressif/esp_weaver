@@ -12,7 +12,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import intent as intent_module
 import pytest
+import voluptuous as vol
+
+# HA < 2024.x does not expose intent.non_empty_string
+if not hasattr(intent_module, "non_empty_string"):
+    intent_module.non_empty_string = vol.All(str, vol.Length(min=1))  # type: ignore[attr-defined]
 
 from custom_components.esp_weaver.iot.specs.events import DOMAIN
 from custom_components.esp_weaver.iot.specs.keys import (
@@ -134,6 +140,7 @@ def mock_esp_api() -> Generator[MagicMock]:
         mock_api.is_device_available_async = AsyncMock(return_value=True)
         mock_api.is_discovery_completed = MagicMock(return_value=False)
         mock_api.mark_discovery_completed = MagicMock()
+        mock_api.is_cloud_device = MagicMock(return_value=False)
         mock_api.is_mdns_available = AsyncMock(return_value=True)
         mock_api.parse_and_discover_entities = AsyncMock()
         mock_api.get_device_data = AsyncMock(return_value={})

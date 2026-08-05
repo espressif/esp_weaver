@@ -27,10 +27,8 @@ _LOGGER = logging.getLogger(__name__)
 class ESPAPIProtocol(Protocol):
     """Protocol for ESP API interface used by light control."""
 
-    async def set_local_ctrl_property(
-        self, node_id: str, prop_name: str, value: Any
-    ) -> bool:
-        """Set a local control property on the device."""
+    async def set_property(self, node_id: str, prop_name: str, value: Any) -> bool:
+        """Set a property on the device (auto-selects local or cloud)."""
         ...
 
 
@@ -64,12 +62,10 @@ def setup_light_control_listener(
         if not properties:
             return
 
-        # Send each property to the device
+        # Send each property to the device (uses cloud or local based on device mode)
         for prop_name, value in properties.items():
             try:
-                success = await api.set_local_ctrl_property(
-                    event_node_id, prop_name, value
-                )
+                success = await api.set_property(event_node_id, prop_name, value)
                 if not success:
                     _LOGGER.warning(
                         "Failed to set light property: %s=%s for %s",

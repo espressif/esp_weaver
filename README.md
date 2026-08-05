@@ -2,7 +2,7 @@
 
 English | [简体中文](README_zh.md)
 
-ESP-Weaver is a local integration for Home Assistant that enables you to control and manage IoT devices based on Espressif (ESP) chips (ESP32, ESP32-S3, ESP32-C series) within Home Assistant.
+ESP-Weaver is an integration for Home Assistant that enables you to control and manage IoT devices based on Espressif (ESP) chips (ESP32, ESP32-S3, ESP32-C series) within Home Assistant. It supports both **local control** (direct LAN communication) and **cloud control** (via ESP RainMaker cloud service).
 
 > [!NOTE]
 > The name "Weaver" is inspired by the weaver bird — a master nest-builder that transforms scattered blades of grass into elaborate, tightly-woven structures. Similarly, ESP-Weaver brings together isolated ESP devices on your network and integrates them into a cohesive smart home within Home Assistant.
@@ -18,12 +18,27 @@ ESP-Weaver is a local integration for Home Assistant that enables you to control
 
 ## Features
 
+### Local Control
+
 - **Local Communication**: All data exchange occurs within the LAN
 - **Auto Discovery**: Automatic device detection via mDNS/Zeroconf protocol
 - **Real-time Sync**: HTTP long-polling mechanism for real-time state updates
 - **Secure Transport**: Support for ESP Local Control Sec0/Sec1 encryption protocols
-- **Entity Support**: Support for Light, Sensor, Binary Sensor, Number, and other entity types
 - **Auto Reconnection**: Device online status detection with automatic connection recovery
+
+### Cloud Control (ESP RainMaker)
+
+- **Cloud Communication**: Control devices via ESP RainMaker cloud service
+- **Account Login**: Login with ESP RainMaker account (Global region; China region planned)
+- **BLE Provisioning**: Provision new devices via BLE with WiFi credentials
+- **Existing Device Import**: Add devices already registered in your RainMaker account
+- **Connectivity Monitoring**: Periodic polling of device connection status with automatic availability updates
+- **Auto CLI Install**: Automatically installs `esp-rainmaker-cli` on first use
+
+### Common
+
+- **Entity Support**: Support for Light, Sensor, Binary Sensor, Number, and other entity types
+- **Dual Mode**: Choose Local Control or Cloud Control per device during setup
 
 ### Supported Entity Types
 
@@ -129,15 +144,17 @@ config/
 
 ## Device Firmware
 
-ESP-Weaver requires devices running compatible firmware that supports ESP Weaver local control protocol. The device-side SDK component (`esp_weaver`) and example firmware are available in the [esp-iot-solution](https://github.com/espressif/esp-iot-solution) repository.
+### Local Control Firmware
 
-### Supported Targets
+For local control mode, devices need to run firmware that supports the ESP-Weaver local control protocol. The device-side SDK component (`esp_weaver`) and example firmware are available in the [esp-iot-solution](https://github.com/espressif/esp-iot-solution) repository.
+
+#### Supported Targets (Local Control)
 
 | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-S3 |
 | ----- | -------- | -------- | -------- | -------- | --------- | -------- |
 |   ✓   |    ✓     |    ✓     |    ✓     |    ✓     |     ✓     |    ✓     |
 
-### Getting the Firmware
+#### Getting the Firmware
 
 ```bash
 # Clone the repository
@@ -145,7 +162,7 @@ git clone https://github.com/espressif/esp-iot-solution.git
 cd esp-iot-solution/examples/weaver
 ```
 
-### Available Examples
+#### Available Examples
 
 The repository provides ready-to-use example projects:
 
@@ -154,21 +171,62 @@ The repository provides ready-to-use example projects:
 | `led_light` | Smart light device with power switch, brightness, HSV color control, and color temperature |
 | `imu_gesture` | IMU gesture sensor with multiple gesture recognition (flip, shake, rotation, clap, etc.) |
 
-### Building and Flashing
+#### Building and Flashing
 
-Please refer to the [ESP Weaver Component README](https://github.com/espressif/esp-iot-solution/tree/master/components/esp_weaver) and each example's README for detailed build and flash instructions.
+Please refer to the [ESP-Weaver Component README](https://github.com/espressif/esp-iot-solution/tree/master/components/esp_weaver) and each example's README for detailed build and flash instructions.
 
 > [!TIP]
 > For detailed build instructions and device-specific configuration, refer to the README in each example directory.
 
+### Cloud Control Firmware (ESP RainMaker)
+
+For cloud control mode, devices need to run the official ESP RainMaker firmware. The `led_light` example from the [esp-rainmaker](https://github.com/espressif/esp-rainmaker) repository is used as the reference firmware.
+
+#### Supported Targets (Cloud Control)
+
+| ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-S3 |
+| ----- | -------- | -------- | -------- | -------- | --------- | -------- |
+|   -   |    -     |    ✓     |    ✓     |    ✓     |     -     |    ✓     |
+
+> [!NOTE]
+> Cloud control currently supports ESP32-C3, ESP32-C5, ESP32-C6, and ESP32-S3. Support for ESP32, ESP32-C2, and ESP32-C61 is planned for a future release.
+
+#### Getting the Firmware
+
+```bash
+# Clone the repository
+git clone https://github.com/espressif/esp-rainmaker.git
+cd esp-rainmaker/examples/led_light
+```
+
+#### Building and Flashing
+
+Please refer to the [ESP RainMaker LED Light Example](https://github.com/espressif/esp-rainmaker/tree/master/examples/led_light) README for detailed build and flash instructions.
+
 ## Device Configuration
 
-The integration supports auto-discovery of ESP devices on the local network:
+### Adding a Device
 
 1. Navigate to **Settings** → **Devices & Services** → **Add Integration**
 2. Search and select **ESP-Weaver**
-3. Choose target device from discovered device list
-4. If device has security mode enabled (Sec1), enter PoP credentials
+3. Choose connection mode: **Local Control** or **Cloud Control**
+
+### Local Control Setup
+
+1. The integration automatically discovers ESP devices on the local network via mDNS
+2. Select the target device from the discovered device list
+3. If the device has security mode enabled (Sec1), enter Proof of Possession (PoP) credentials
+
+### Cloud Control Setup (ESP RainMaker)
+
+1. Select **Cloud Control (ESP RainMaker)** as the connection mode
+2. Choose your region (currently Global only) and login with your RainMaker account
+3. Choose an action:
+   - **Add Existing Device**: Select a device already registered in your RainMaker account
+   - **Provision New Device**: Enter the BLE device name (e.g., `PROV_XXXXXX` from serial log), configure WiFi credentials and PoP (Proof of Possession), and the integration will provision and register the device automatically
+
+> [!IMPORTANT]
+> **Provision New Device** requires the Home Assistant host machine (PC, Raspberry Pi, etc.) to have Bluetooth (BLE) capability. Adding existing devices does not require this.
 
 Upon completion, device entities will be automatically registered in Home Assistant.
 
@@ -185,18 +243,21 @@ This integration follows a layered architecture adhering to the single responsib
 │  coordinator.py (ESPDataUpdateCoordinator)                  │
 │  └── Data updates, availability checks, reconnection        │
 ├─────────────────────────────────────────────────────────────┤
-│  iot/client/device_api.py (ESPWeaverApi)                        │
+│  iot/client/device_api.py (ESPWeaverApi)                    │
 │  └── Main API coordinator, delegates to managers            │
-├─────────────────────────────────────────────────────────────┤
+├──────────────────────┬──────────────────────────────────────┤
+│  Local Control Path  │  Cloud Control Path                  │
+├──────────────────────┼──────────────────────────────────────┤
+│  iot/client/client.py│  iot/cloud/rmaker_cli_client.py      │
+│  (ESPLocalCtrlClient)│  (RainMakerCLIClient)                │
+│  └── ESP Local Ctrl  │  └── ESP RainMaker CLI               │
+├──────────────────────┴──────────────────────────────────────┤
 │  iot/managers/ (Manager Classes)                            │
 │  ├── DeviceRegistry      - Device state registry            │
 │  ├── AvailabilityManager - Availability detection           │
 │  ├── ConnectionManager   - Connection lifecycle             │
 │  ├── PropertyManager     - Property read/write & messaging  │
 │  └── DeviceDiscoveryManager - Entity discovery              │
-├─────────────────────────────────────────────────────────────┤
-│  iot/client/client.py (ESPLocalCtrlClient)                  │
-│  └── ESP Local Control protocol implementation              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -211,12 +272,14 @@ This integration follows a layered architecture adhering to the single responsib
 | **ConnectionManager** | `iot/managers/connection_manager.py` | Connection establishment, reconnection |
 | **PropertyManager** | `iot/managers/property_manager.py` | Property operations, event dispatching |
 | **DeviceDiscoveryManager** | `iot/managers/entity_discovery.py` | Configuration parsing, entity discovery |
-| **ESPLocalCtrlClient** | `iot/client/client.py` | Protocol-level device communication |
+| **ESPLocalCtrlClient** | `iot/client/client.py` | Protocol-level local device communication |
+| **RainMakerCLIClient** | `iot/cloud/rmaker_cli_client.py` | ESP RainMaker cloud communication via CLI |
 
 ## References
 
 | Resource | Link |
 |----------|------|
-| ESP Weaver SDK | [esp-iot-solution/components/esp_weaver](https://github.com/espressif/esp-iot-solution/tree/master/components/esp_weaver) |
+| ESP-Weaver SDK | [esp-iot-solution/components/esp_weaver](https://github.com/espressif/esp-iot-solution/tree/master/components/esp_weaver) |
+| ESP RainMaker | [github.com/espressif/esp-rainmaker](https://github.com/espressif/esp-rainmaker) |
 | ESP Local Control | [ESP-IDF Programming Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/protocols/esp_local_ctrl.html) |
 | Home Assistant Dev | [developers.home-assistant.io](https://developers.home-assistant.io/) |
