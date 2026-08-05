@@ -15,6 +15,7 @@ from homeassistant.components import zeroconf
 from homeassistant.core import HomeAssistant
 from zeroconf import ServiceBrowser
 
+from ..cloud import RainMakerCLIClient
 from ..discovery.network import MDNS_SERVICE_TYPE, GlobalMDNSListener
 from ..managers.availability_manager import AvailabilityManager
 from ..managers.connection_manager import ConnectionManager
@@ -22,6 +23,8 @@ from ..managers.device_registry import DeviceRegistry
 from ..managers.entity_discovery import DeviceDiscoveryManager
 from ..managers.property_manager import ConnectionCallbacks, PropertyManager
 from ..parsers.property_parser import get_device_states
+from ..payload.command_builder import build_device_command
+from ..specs.keys import CONNECTION_MODE_CLOUD, CONNECTION_MODE_LOCAL
 
 if TYPE_CHECKING:
     from zeroconf import Zeroconf
@@ -29,7 +32,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 
-class ESPWeaverApi:
+class ESPWeaverApi:  # pylint: disable=too-many-public-methods
     """API coordinator for ESP-Weaver devices."""
 
     def __init__(
@@ -83,6 +86,11 @@ class ESPWeaverApi:
         self._global_browser: ServiceBrowser | None = None
         self._global_listener: GlobalMDNSListener | None = None
 
+        # Cloud control: per-device client (supports mixed regions)
+        self._cloud_clients: dict[str, RainMakerCLIClient] = {}
+        # Mapping of node_id to connection_mode ("local" or "cloud")
+        self._device_connection_modes: dict[str, str] = {}
+
     # Public Properties - Direct access to managers
 
     @property
@@ -90,14 +98,72 @@ class ESPWeaverApi:
         """Get all registered devices as dict."""
         return {k: v.to_dict() for k, v in self.registry.get_all_devices().items()}
 
-    # Device Availability
+    # Cloud Control Methods
 
-    def is_device_available(self, node_id: str) -> bool:
-        """Check if device is available (sync version)."""
-        return self.registry.is_device_available(node_id)
+    def set_cloud_client(self, node_id: str, client: RainMakerCLIClient) -> None:
+        """Set the cloud client for a specific device."""
+        self._cloud_clients[node_id] = client
+
+    def is_cloud_device(self, node_id: str) -> bool:
+        """Check if a device uses cloud control."""
+        return (
+            self._device_connection_modes.get(node_id, CONNECTION_MODE_LOCAL)
+            == CONNECTION_MODE_CLOUD
+        )
+
+    def _get_cloud_client(self, node_id: str) -> RainMakerCLIClient | None:
+        """Get the cloud client for a device."""
+        return self._cloud_clients.get(node_id)
+
+    async def _set_cloud_property(
+        self,
+        node_id: str,
+        prop_name: str,
+        value: Any,
+    ) -> bool:
+        """Set device property via cloud using the same command builder as local."""
+        client = self._get_cloud_client(node_id)
+        if not client:
+            _LOGGER.error("Cloud client not configured for %s", node_id)
+            return False
+
+        params = build_device_command(prop_name, value)
+        if not params:
+            _LOGGER.error("Failed to build cloud command for parameter: %s", prop_name)
+            return False
+
+        return await client.set_params(node_id, params)
+
+    async def get_cloud_params(self, node_id: str) -> dict[str, Any] | None:
+        """Get device parameters from cloud."""
+        client = self._get_cloud_client(node_id)
+        if not client:
+            _LOGGER.debug("Cloud client not configured for %s", node_id)
+            return None
+        return await client.get_params(node_id)
+
+    async def get_cloud_node_config(self, node_id: str) -> dict[str, Any] | None:
+        """Get device node config from cloud."""
+        client = self._get_cloud_client(node_id)
+        if not client:
+            _LOGGER.debug("Cloud client not configured for %s", node_id)
+            return None
+        return await client.get_node_details(node_id)
+
+    async def is_cloud_device_online(self, node_id: str) -> bool | None:
+        """Check if a cloud device is online (True/False/None if not found)."""
+        client = self._get_cloud_client(node_id)
+        if not client:
+            return None
+        return await client.get_node_connectivity(node_id)
+
+    # Device Availability
 
     async def is_device_available_async(self, node_id: str) -> bool:
         """Check if device is available (async version)."""
+        if self.is_cloud_device(node_id):
+            online = await self.is_cloud_device_online(node_id)
+            return bool(online)
         return await self.registry.is_device_available_async(node_id)
 
     async def is_mdns_available(
@@ -131,16 +197,39 @@ class ESPWeaverApi:
             node_id, properties, preferred_device_name
         )
 
+    async def discover_from_cloud(
+        self,
+        node_id: str,
+        node_config: dict[str, Any],
+        cloud_params: dict[str, Any],
+        device_name: str,
+    ) -> None:
+        """Discover entities from cloud device config."""
+        await self._discovery.discover_from_cloud(
+            node_id, node_config, cloud_params, device_name
+        )
+
     # Property Operations
 
-    async def set_local_ctrl_property(
+    async def _set_local_property(
         self,
         node_id: str,
         prop_name: str,
         value: Any,
     ) -> bool:
-        """Set device property value."""
+        """Set device property value via local control."""
         return await self._property.set_property(node_id, prop_name, value)
+
+    async def set_property(
+        self,
+        node_id: str,
+        prop_name: str,
+        value: Any,
+    ) -> bool:
+        """Set device property, auto-selecting local or cloud based on device mode."""
+        if self.is_cloud_device(node_id):
+            return await self._set_cloud_property(node_id, prop_name, value)
+        return await self._set_local_property(node_id, prop_name, value)
 
     def process_property_update(self, node_id: str, params_data: dict) -> None:
         """Process property update and fire events."""
@@ -148,9 +237,18 @@ class ESPWeaverApi:
 
     # Device Registration & Lifecycle
 
-    def register_config_entry(self, node_id: str, entry_id: str) -> None:
+    def register_config_entry(
+        self, node_id: str, entry_id: str, connection_mode: str = CONNECTION_MODE_LOCAL
+    ) -> None:
         """Register a config entry for a device."""
         self.registry.register_config_entry(node_id, entry_id)
+        self._device_connection_modes[node_id] = connection_mode
+
+    def register_cloud_device(self, node_id: str) -> None:
+        """Register a cloud-controlled device in the registry."""
+        device = self.registry.register_device(node_id, "", 0)
+        device.registered = True
+        _LOGGER.info("Cloud device %s registered", node_id)
 
     async def register_device(
         self,
@@ -214,6 +312,8 @@ class ESPWeaverApi:
 
     async def unregister_device(self, node_id: str) -> None:
         """Unregister and clean up a device."""
+        self._device_connection_modes.pop(node_id, None)
+        self._cloud_clients.pop(node_id, None)
         await self._connection.disconnect_device(node_id)
         await self.registry.remove_device(node_id)
 
@@ -225,6 +325,8 @@ class ESPWeaverApi:
             self._global_browser = None
 
         self._global_listener = None
+        self._cloud_clients.clear()
+        self._device_connection_modes.clear()
 
         await self._connection.disconnect_all()
 
@@ -358,7 +460,7 @@ class ESPWeaverApi:
 
         _LOGGER.debug("Reconnection successful, retrying property set for %s", node_id)
 
-        result = await self.set_local_ctrl_property(node_id, prop_name, value)
+        result = await self._set_local_property(node_id, prop_name, value)
 
         if result:
             # Update last_success under device lock to avoid race with register_device

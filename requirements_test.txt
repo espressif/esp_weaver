@@ -19,6 +19,16 @@ pytest-homeassistant-custom-component>=0.13.301
 # Note: Must match the version used to generate *_pb2.py files
 protobuf>=6.31.0
 
+# RainMaker cloud support (compatible with HA's cryptography>=46.0.2)
+# Note: esp-secure-cert-tool>=2.0.0 doesn't pin cryptography version
+esp-secure-cert-tool>=2.0.0
+
+# NOTE: esp-rainmaker-cli installation:
+# - The integration auto-installs esp-rainmaker-cli with --no-deps on first use
+# - This avoids the cryptography version conflict from esp-secure-cert-tool==1.0.1
+# - For CI/testing, we install it explicitly below (after requirements_test.txt)
+# - Tests mock subprocess.run and _ensure_cli_available(), no real CLI needed
+
 # Linting tools
 ruff==0.14.11
 mypy==1.19.1

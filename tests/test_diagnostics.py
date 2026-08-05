@@ -222,7 +222,7 @@ class TestConfigEntryDiagnostics:
         mock_coordinator.is_available = True
 
         mock_esp_api.devices = {TEST_NODE_ID: {"ip": TEST_HOST}}
-        mock_esp_api.is_device_available = MagicMock(return_value=True)
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
         mock_esp_api.is_discovery_completed = MagicMock(return_value=True)
         mock_esp_api.get_device_data = AsyncMock(return_value={"test": "data"})
 
@@ -262,7 +262,7 @@ class TestConfigEntryDiagnostics:
         mock_coordinator.is_available = True
 
         mock_esp_api.devices = {TEST_NODE_ID: {}}
-        mock_esp_api.is_device_available = MagicMock(return_value=True)
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
         mock_esp_api.is_discovery_completed = MagicMock(return_value=True)
         mock_esp_api.get_device_data = AsyncMock(return_value={})
 
@@ -305,7 +305,7 @@ class TestConfigEntryDiagnostics:
         mock_coordinator.api = mock_esp_api
 
         mock_esp_api.devices = {TEST_NODE_ID: {}}
-        mock_esp_api.is_device_available = MagicMock(return_value=True)
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
         mock_esp_api.is_discovery_completed = MagicMock(return_value=True)
         mock_esp_api.get_device_data = AsyncMock(
             side_effect=RuntimeError("Connection error")
@@ -336,7 +336,7 @@ class TestDeviceDiagnostics:
         mock_coordinator.api = mock_esp_api
 
         mock_esp_api.devices = {TEST_NODE_ID: {"ip": TEST_HOST}}
-        mock_esp_api.is_device_available = MagicMock(return_value=True)
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
         mock_esp_api.get_device_data = AsyncMock(
             return_value={"ip": TEST_HOST, "test": "data"}
         )
@@ -370,7 +370,7 @@ class TestDeviceDiagnostics:
         mock_coordinator.is_available = True
 
         mock_esp_api.devices = {TEST_NODE_ID: {}}
-        mock_esp_api.is_device_available = MagicMock(return_value=True)
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
         mock_esp_api.get_device_data = AsyncMock(return_value={})
 
         result = await async_get_device_diagnostics(hass, entry, mock_device_entry)

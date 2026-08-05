@@ -279,6 +279,61 @@ class TestParseDevicePropertiesEdgeCases:
             "level1": {"level2": {"level3": {"value": 123}}}
         }
 
+    def test_decode_bytes_non_dict_json(self) -> None:
+        """Test decoding bytes that parse to non-dict (e.g., array)."""
+        # JSON array instead of object
+        bytes_data = b"[1, 2, 3]"
+        result = decode_property_value(bytes_data)
+        assert result is None
+
+    def test_decode_string_non_dict_json(self) -> None:
+        """Test decoding string that parses to non-dict (e.g., array, number)."""
+        # JSON array
+        result = decode_property_value("[1, 2, 3]")
+        assert result is None
+
+        # JSON number
+        result = decode_property_value("123")
+        assert result is None
+
+        # JSON string
+        result = decode_property_value('"hello"')
+        assert result is None
+
+    def test_binary_sensor_state_field(self) -> None:
+        """Test parsing 'State' field for binary sensors."""
+        # When device sends State as top-level field (not nested in device type)
+        properties = [
+            {
+                "name": "params",
+                "value": json.dumps({"State": True}),
+            }
+        ]
+
+        result = parse_device_properties(properties)
+
+        # State should be stored under Binary Sensor namespace
+        assert "Binary Sensor" in result.by_device_type
+        assert result.by_device_type["Binary Sensor"]["State"] is True
+
+    def test_merge_existing_device_data(self) -> None:
+        """Test merging data for same device type from multiple properties."""
+        properties = [
+            {
+                "name": "params",
+                "value": json.dumps({"Light": {"power": True}}),
+            },
+            {
+                "name": "params2",
+                "value": json.dumps({"Light": {"brightness": 128}}),
+            },
+        ]
+
+        result = parse_device_properties(properties)
+
+        # Both values should be merged under Light
+        assert result.by_device_type["Light"] == {"power": True, "brightness": 128}
+
 
 # =============================================================================
 # Config Parser Tests

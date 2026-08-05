@@ -43,7 +43,7 @@ rules:
   entity-unavailable:
     status: done
     comment: >-
-      Implemented via api.is_device_available() with connection and session state checks
+      Implemented via api.is_device_available_async() with connection and session state checks
 
   parallel-updates:
     status: done

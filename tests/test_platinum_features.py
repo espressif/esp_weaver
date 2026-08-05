@@ -5,7 +5,7 @@
 """Tests for ESP-Weaver Platinum quality features."""
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -33,7 +33,7 @@ class TestStaleDeviceRemoval:
     ) -> None:
         """Test removing offline device is allowed."""
         entry = create_mock_config_entry(mock_config_entry_data)
-        mock_esp_api.is_device_available = MagicMock(return_value=False)
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=False)
 
         hass.data[DOMAIN] = {"api": mock_esp_api}
 
@@ -42,7 +42,7 @@ class TestStaleDeviceRemoval:
 
         result = await async_remove_config_entry_device(hass, entry, device_entry)
 
-        mock_esp_api.is_device_available.assert_called_once_with(TEST_NODE_ID)
+        mock_esp_api.is_device_available_async.assert_called_once_with(TEST_NODE_ID)
         assert result is True
 
     async def test_remove_online_device_blocked(
@@ -53,7 +53,7 @@ class TestStaleDeviceRemoval:
     ) -> None:
         """Test removing online device is blocked."""
         entry = create_mock_config_entry(mock_config_entry_data)
-        mock_esp_api.is_device_available = MagicMock(return_value=True)
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
 
         hass.data[DOMAIN] = {"api": mock_esp_api}
 
@@ -62,7 +62,7 @@ class TestStaleDeviceRemoval:
 
         result = await async_remove_config_entry_device(hass, entry, device_entry)
 
-        mock_esp_api.is_device_available.assert_called_once_with(TEST_NODE_ID)
+        mock_esp_api.is_device_available_async.assert_called_once_with(TEST_NODE_ID)
         assert result is False
 
     async def test_remove_device_no_api(

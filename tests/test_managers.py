@@ -4,7 +4,7 @@
 
 """Test the ESP-Weaver managers module."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -312,3 +312,128 @@ class TestDeviceRegistryConfigEntry:
         entry_id = registry.get_config_entry_id("non_existent")
 
         assert entry_id is None
+
+
+class TestDeviceRegistryRemoveDevice:
+    """Test DeviceRegistry remove_device method."""
+
+    async def test_remove_device_client_disconnect_failure(self) -> None:
+        """Test remove_device handles client disconnect failures."""
+        registry = DeviceRegistry()
+        registry.register_device("test_node", "192.168.1.100")
+        registry.mark_discovery_completed("test_node")
+        registry.register_config_entry("test_node", "entry_123")
+
+        # Create mock client that fails on disconnect
+        mock_client = MagicMock()
+        mock_client.disconnect = AsyncMock(side_effect=OSError("Disconnect failed"))
+        registry.set_client("test_node", mock_client)
+
+        # Should not raise, handles exception gracefully
+        await registry.remove_device("test_node")
+
+        # Device should be removed despite disconnect failure
+        assert registry.get_device("test_node") is None
+        assert registry.get_client("test_node") is None
+        assert not registry.is_discovery_completed("test_node")
+        assert registry.get_config_entry_id("test_node") is None
+
+    async def test_remove_device_client_disconnect_timeout(self) -> None:
+        """Test remove_device handles client disconnect timeout."""
+        registry = DeviceRegistry()
+        registry.register_device("test_node", "192.168.1.100")
+
+        mock_client = MagicMock()
+        mock_client.disconnect = AsyncMock(side_effect=TimeoutError())
+        registry.set_client("test_node", mock_client)
+
+        # Should not raise
+        await registry.remove_device("test_node")
+
+        assert registry.get_device("test_node") is None
+        assert registry.get_client("test_node") is None
+
+
+class TestDeviceRegistryAvailability:
+    """Test DeviceRegistry availability check methods."""
+
+    def test_is_device_available_no_client(self) -> None:
+        """Test is_device_available returns False when no client."""
+        registry = DeviceRegistry()
+        device = registry.register_device("test_node", "192.168.1.100")
+        device.registered = True
+
+        # No client set
+        result = registry.is_device_available("test_node")
+        assert result is False
+
+    def test_is_device_available_client_attribute_error(self) -> None:
+        """Test is_device_available handles AttributeError from client."""
+
+        registry = DeviceRegistry()
+        device = registry.register_device("test_node", "192.168.1.100")
+        device.registered = True
+
+        # Create a class that raises AttributeError when accessing session_established
+        class InvalidClient:
+            @property
+            def session_established(self):
+                raise AttributeError("Client in invalid state")
+
+        registry._clients["test_node"] = InvalidClient()
+
+        result = registry.is_device_available("test_node")
+        assert result is False
+
+    async def test_is_device_available_async_device_not_available(self) -> None:
+        """Test is_device_available_async returns False when device not available."""
+        registry = DeviceRegistry()
+        # Device not registered
+        result = await registry.is_device_available_async("test_node")
+        assert result is False
+
+    async def test_is_device_available_async_no_client_after_check(self) -> None:
+        """Test is_device_available_async returns False when client removed (race)."""
+        registry = DeviceRegistry()
+        device = registry.register_device("test_node", "192.168.1.100")
+        device.registered = True
+
+        # Mock: is_device_available returns True, but get_client returns None
+        # This simulates a race condition where client is removed between checks
+        with (
+            patch.object(registry, "is_device_available", return_value=True),
+            patch.object(registry, "get_client", return_value=None),
+        ):
+            result = await registry.is_device_available_async("test_node")
+
+        assert result is False
+
+    async def test_is_device_available_async_is_connected_oserror(self) -> None:
+        """Test is_device_available_async handles OSError from is_connected."""
+        registry = DeviceRegistry()
+        device = registry.register_device("test_node", "192.168.1.100")
+        device.registered = True
+
+        mock_client = MagicMock()
+        mock_client.session_established = True
+        mock_client.transport = MagicMock()
+        mock_client.is_connected = AsyncMock(side_effect=OSError("Network error"))
+        registry.set_client("test_node", mock_client)
+
+        result = await registry.is_device_available_async("test_node")
+        assert result is False
+
+    async def test_is_device_available_async_is_connected_attribute_error(self) -> None:
+        """Test is_device_available_async handles AttributeError from is_connected."""
+        registry = DeviceRegistry()
+        device = registry.register_device("test_node", "192.168.1.100")
+        device.registered = True
+
+        mock_client = MagicMock()
+        mock_client.session_established = True
+        mock_client.transport = MagicMock()
+        mock_client.is_connected = AsyncMock(side_effect=AttributeError("Invalid"))
+        registry.set_client("test_node", mock_client)
+
+        result = await registry.is_device_available_async("test_node")
+        assert result is False

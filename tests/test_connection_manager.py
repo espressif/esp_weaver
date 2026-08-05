@@ -744,3 +744,168 @@ class TestConnectionManagerEstablishSession:
 
             assert result is True
             mock_client.add_message_callback.assert_called_once_with(message_handler)
+
+    async def test_establish_session_existing_client_disconnect_error(
+        self,
+        hass: HomeAssistant,
+    ) -> None:
+        """Test _establish_session handles disconnect error for existing client."""
+        registry = DeviceRegistry()
+        manager = ConnectionManager(
+            hass=hass,
+            domain="esp_weaver",
+            registry=registry,
+        )
+
+        # Create mock existing client that is disconnected and fails on disconnect
+        mock_existing_client = MagicMock()
+        mock_existing_client.is_connected = AsyncMock(return_value=False)
+        mock_existing_client.disconnect = AsyncMock(
+            side_effect=OSError("Disconnect failed")
+        )
+        registry.set_client("test_node", mock_existing_client)
+
+        with patch(
+            "custom_components.esp_weaver.iot.managers.connection_manager.ESPLocalCtrlClient"
+        ) as mock_class:
+            mock_new_client = MagicMock()
+            mock_new_client.connect = AsyncMock(return_value=True)
+            mock_new_client.add_message_callback = MagicMock()
+            mock_new_client.set_connection_error_callback = MagicMock()
+            mock_class.return_value = mock_new_client
+
+            result = await manager._establish_session(
+                "test_node", "192.168.1.100", 8080
+            )
+
+            mock_existing_client.disconnect.assert_awaited_once()
+            assert result is True
+
+    async def test_establish_session_existing_client_disconnect_runtime_error(
+        self,
+        hass: HomeAssistant,
+    ) -> None:
+        """Test _establish_session handles RuntimeError on disconnect."""
+        registry = DeviceRegistry()
+        manager = ConnectionManager(
+            hass=hass,
+            domain="esp_weaver",
+            registry=registry,
+        )
+
+        mock_existing_client = MagicMock()
+        mock_existing_client.is_connected = AsyncMock(return_value=False)
+        mock_existing_client.disconnect = AsyncMock(
+            side_effect=RuntimeError("Client in invalid state")
+        )
+        registry.set_client("test_node", mock_existing_client)
+
+        with patch(
+            "custom_components.esp_weaver.iot.managers.connection_manager.ESPLocalCtrlClient"
+        ) as mock_class:
+            mock_new_client = MagicMock()
+            mock_new_client.connect = AsyncMock(return_value=True)
+            mock_new_client.add_message_callback = MagicMock()
+            mock_new_client.set_connection_error_callback = MagicMock()
+            mock_class.return_value = mock_new_client
+
+            result = await manager._establish_session(
+                "test_node", "192.168.1.100", 8080
+            )
+
+            mock_existing_client.disconnect.assert_awaited_once()
+            assert result is True
+
+
+class TestConnectionManagerConnectAndSyncSkipProcessing:
+    """Test ConnectionManager connect_and_sync with process_properties=False."""
+
+    async def test_connect_and_sync_skip_processing_already_connected(
+        self,
+        hass: HomeAssistant,
+    ) -> None:
+        """Test connect_and_sync with process_properties=False when already connected."""
+        registry = DeviceRegistry()
+        manager = ConnectionManager(
+            hass=hass,
+            domain="esp_weaver",
+            registry=registry,
+        )
+
+        mock_client = MagicMock(spec=ESPLocalCtrlClient)
+        mock_client.is_connected = AsyncMock(return_value=True)
+        registry.set_client("test_node", mock_client)
+
+        success, properties = await manager.connect_and_sync(
+            "test_node",
+            "192.168.1.100",
+            8080,
+            process_properties=False,
+        )
+
+        assert success is True
+        assert properties is None
+
+    async def test_connect_and_sync_skip_processing_new_connection(
+        self,
+        hass: HomeAssistant,
+    ) -> None:
+        """Test connect_and_sync with process_properties=False for new connection."""
+        registry = DeviceRegistry()
+        manager = ConnectionManager(
+            hass=hass,
+            domain="esp_weaver",
+            registry=registry,
+        )
+
+        with patch.object(
+            manager,
+            "_establish_session",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            success, properties = await manager.connect_and_sync(
+                "test_node",
+                "192.168.1.100",
+                8080,
+                process_properties=False,
+            )
+
+            assert success is True
+            assert properties is None
+
+    async def test_connect_and_sync_no_properties_fetched(
+        self,
+        hass: HomeAssistant,
+    ) -> None:
+        """Test connect_and_sync when no properties are fetched (logs warning)."""
+        registry = DeviceRegistry()
+        manager = ConnectionManager(
+            hass=hass,
+            domain="esp_weaver",
+            registry=registry,
+        )
+
+        with (
+            patch.object(
+                manager,
+                "_establish_session",
+                new_callable=AsyncMock,
+                return_value=True,
+            ),
+            patch.object(
+                manager,
+                "_fetch_device_properties",
+                new_callable=AsyncMock,
+                return_value=None,  # No properties fetched
+            ),
+        ):
+            success, properties = await manager.connect_and_sync(
+                "test_node",
+                "192.168.1.100",
+                8080,
+                process_properties=True,
+            )
+
+            assert success is True
+            assert properties is None

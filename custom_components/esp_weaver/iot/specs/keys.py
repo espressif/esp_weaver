@@ -200,3 +200,17 @@ SOURCE_NUMBER_ENTITY: Final[str] = "number_entity"
 CONF_NODE_ID: Final[str] = "node_id"
 CONF_CUSTOM_POP: Final[str] = "custom_pop"
 CONF_SECURITY_VERSION: Final[str] = "security_version"
+
+# CLOUD CONTROL KEYS
+
+CONF_CONNECTION_MODE: Final[str] = "connection_mode"
+
+# Connection mode values
+CONNECTION_MODE_LOCAL: Final = "local"
+CONNECTION_MODE_CLOUD: Final = "cloud"
+
+# RainMaker API keys
+CONF_RAINMAKER_REGION: Final[str] = "rainmaker_region"
+
+# RainMaker region values
+RAINMAKER_REGION_GLOBAL: Final = "global"

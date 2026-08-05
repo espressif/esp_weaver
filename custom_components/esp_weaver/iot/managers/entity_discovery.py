@@ -555,3 +555,27 @@ class DeviceDiscoveryManager:
         return self._device_parser.parse_device_config(
             config_value, preferred_device_name
         )
+
+    # Cloud Device Discovery
+
+    async def discover_from_cloud(
+        self,
+        node_id: str,
+        node_config: dict[str, Any],
+        cloud_params: dict[str, Any],
+        device_name: str,
+    ) -> None:
+        """Discover entities from cloud data, converting to local properties format."""
+        if not node_config or "devices" not in node_config:
+            _LOGGER.warning(
+                "Invalid node config for cloud device %s: missing 'devices'", node_id
+            )
+            return
+
+        properties: list[dict[str, Any]] = [
+            {KEY_NAME: KEY_CONFIG, KEY_VALUE: node_config},
+        ]
+        if cloud_params:
+            properties.append({KEY_NAME: KEY_PARAMS, KEY_VALUE: cloud_params})
+
+        await self.parse_and_discover_entities(node_id, properties, device_name)

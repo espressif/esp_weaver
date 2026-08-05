@@ -489,9 +489,8 @@ class TestThresholdManagerUpdateHandler:
         manager = ThresholdManager(hass, "esp_weaver")
         handler = manager.create_update_handler(TEST_NODE_ID)
 
-        # Setup mock API to verify it's not called
         mock_api = MagicMock()
-        mock_api.set_local_ctrl_property = AsyncMock()
+        mock_api.set_property = AsyncMock()
         hass.data["esp_weaver"] = {"api": mock_api}
 
         event = MagicMock()
@@ -499,8 +498,7 @@ class TestThresholdManagerUpdateHandler:
 
         await handler(event)
 
-        # Verify API was not called for non-matching node
-        mock_api.set_local_ctrl_property.assert_not_called()
+        mock_api.set_property.assert_not_called()
 
     async def test_update_handler_ignores_non_number_source(
         self,
@@ -510,9 +508,8 @@ class TestThresholdManagerUpdateHandler:
         manager = ThresholdManager(hass, "esp_weaver")
         handler = manager.create_update_handler(TEST_NODE_ID)
 
-        # Setup mock API to verify it's not called
         mock_api = MagicMock()
-        mock_api.set_local_ctrl_property = AsyncMock()
+        mock_api.set_property = AsyncMock()
         hass.data["esp_weaver"] = {"api": mock_api}
 
         event = MagicMock()
@@ -523,8 +520,7 @@ class TestThresholdManagerUpdateHandler:
 
         await handler(event)
 
-        # Verify API was not called for non-number source
-        mock_api.set_local_ctrl_property.assert_not_called()
+        mock_api.set_property.assert_not_called()
 
     async def test_update_handler_no_api(
         self,
@@ -561,7 +557,7 @@ class TestThresholdManagerUpdateHandler:
         handler = manager.create_update_handler(TEST_NODE_ID)
 
         mock_api = MagicMock()
-        mock_api.set_local_ctrl_property = AsyncMock(return_value=True)
+        mock_api.set_property = AsyncMock(return_value=True)
         hass.data["esp_weaver"] = {"api": mock_api}
 
         event = MagicMock()
@@ -576,7 +572,7 @@ class TestThresholdManagerUpdateHandler:
 
         await handler(event)
 
-        mock_api.set_local_ctrl_property.assert_called_once_with(
+        mock_api.set_property.assert_called_once_with(
             TEST_NODE_ID,
             "temperature_min_threshold",
             15.0,
@@ -592,7 +588,7 @@ class TestThresholdManagerUpdateHandler:
         handler = manager.create_update_handler(TEST_NODE_ID)
 
         mock_api = MagicMock()
-        mock_api.set_local_ctrl_property = AsyncMock(return_value=False)
+        mock_api.set_property = AsyncMock(return_value=False)
         hass.data["esp_weaver"] = {"api": mock_api}
 
         event = MagicMock()

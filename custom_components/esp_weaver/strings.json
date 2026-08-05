@@ -10,8 +10,67 @@
   "config": {
     "step": {
       "user": {
-        "title": "ESP Device Discovery",
-        "description": "Searching for ESP devices on your network..."
+        "title": "Connection Mode",
+        "description": "Choose how to connect to your ESP devices.\n\n• **Local Control**: Discover devices on your local network via mDNS (recommended for low latency)\n• **Cloud Control**: Connect via ESP RainMaker cloud (works when devices are not on local network)",
+        "data": {
+          "connection_mode": "Connection Mode"
+        }
+      },
+      "rainmaker_login": {
+        "title": "RainMaker Login",
+        "description": "Login to your ESP RainMaker account.\n\nEnter your RainMaker credentials to access your cloud devices.",
+        "data": {
+          "rainmaker_region": "Region",
+          "email": "Email",
+          "password": "Password"
+        },
+        "data_description": {
+          "rainmaker_region": "Select the RainMaker region where your devices are registered.",
+          "email": "Your ESP RainMaker account email address.",
+          "password": "Your ESP RainMaker account password."
+        }
+      },
+      "cloud_action_select": {
+        "title": "Choose Action",
+        "description": "Select what you want to do:\n\n• **Add Existing Device**: Add a device that's already registered in your RainMaker account\n• **Provision New Device**: Configure a new device via BLE and add it to your account",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "ble_scan": {
+        "title": "Enter Device Name",
+        "description": "Power on your ESP device and check the serial log for a message like:\n\n**Provisioning started with service name : PROV_XXXXXX**\n\nEnter the device name (e.g., PROV_724d86) below.",
+        "data": {
+          "device_name": "Device Name (from serial log)"
+        }
+      },
+      "wifi_config": {
+        "title": "WiFi Configuration",
+        "description": "Enter WiFi credentials for device \"{device_name}\".\n\nThe device will connect to this WiFi network after provisioning.",
+        "data": {
+          "wifi_ssid": "WiFi Network Name (SSID)",
+          "wifi_password": "WiFi Password",
+          "device_pop": "PoP Code (optional)"
+        },
+        "data_description": {
+          "wifi_ssid": "The name of the WiFi network to connect to.",
+          "wifi_password": "The password for the WiFi network.",
+          "device_pop": "Proof of Possession code if required by your device."
+        }
+      },
+      "provisioning": {
+        "title": "Provisioning Device",
+        "description": "Sending WiFi credentials to device and connecting to cloud...\n\nThis may take up to 2 minutes. Please wait."
+      },
+      "cloud_device_select": {
+        "title": "Select Cloud Device",
+        "description": "Found {device_count} ESP RainMaker device(s). Select one to add.\n\nDevices marked as 'Online' are currently connected to the cloud.",
+        "data": {
+          "selected_device": "Device"
+        },
+        "data_description": {
+          "selected_device": "Select the ESP RainMaker device to add."
+        }
       },
       "pop_input": {
         "title": "Authentication Required",
@@ -42,7 +101,11 @@
       "cannot_connect": "Failed to connect to device.",
       "timeout": "Connection timed out.",
       "invalid_auth": "Authentication failed.",
-      "invalid_device_selection": "Invalid device selection."
+      "invalid_device_selection": "Invalid device selection.",
+      "rainmaker_not_logged_in": "Not logged in to RainMaker. Please enter your credentials.",
+      "rainmaker_login_failed": "Failed to authenticate with RainMaker. Please check your credentials.",
+      "provisioning_failed": "Failed to provision device. Please check that the device is in provisioning mode and try again.",
+      "wifi_ssid_required": "WiFi network name is required."
     },
     "abort": {
       "already_configured": "Device already configured.",

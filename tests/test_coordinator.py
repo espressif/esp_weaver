@@ -18,6 +18,8 @@ from custom_components.esp_weaver.const import (
     CACHE_LIGHTS,
     CACHE_NUMBERS,
     CACHE_SENSORS,
+    CLOUD_CONNECTIVITY_CHECK_POLLS,
+    CLOUD_PARAMS_FAILURE_THRESHOLD,
     RECONNECT_DELAYS,
 )
 from custom_components.esp_weaver.coordinator import ESPDataUpdateCoordinator
@@ -942,7 +944,7 @@ class TestCoordinatorDataUpdateEdgeCases:
 
 
 class TestCoordinatorFetchDeviceProperties:
-    """Test _fetch_device_properties method."""
+    """Test _discover_local_device method."""
 
     async def test_fetch_properties_no_client(
         self,
@@ -950,11 +952,12 @@ class TestCoordinatorFetchDeviceProperties:
         mock_esp_api: MagicMock,
         mock_config_entry_data: dict[str, Any],
     ) -> None:
-        """Test fetch returns None when no client."""
+        """Test discover exits early when no client."""
         entry = create_mock_config_entry(mock_config_entry_data)
 
         mock_esp_api.registry = MagicMock()
         mock_esp_api.registry.get_client.return_value = None
+        mock_esp_api.parse_and_discover_entities = AsyncMock()
 
         coordinator = ESPDataUpdateCoordinator(
             hass=hass,
@@ -964,9 +967,9 @@ class TestCoordinatorFetchDeviceProperties:
             config_entry=entry,
         )
 
-        result = await coordinator._fetch_device_properties()
+        await coordinator._discover_local_device()
 
-        assert result is None
+        mock_esp_api.parse_and_discover_entities.assert_not_called()
 
     async def test_fetch_properties_success(
         self,
@@ -974,13 +977,15 @@ class TestCoordinatorFetchDeviceProperties:
         mock_esp_api: MagicMock,
         mock_config_entry_data: dict[str, Any],
     ) -> None:
-        """Test successful property fetch."""
+        """Test successful local device discovery."""
         entry = create_mock_config_entry(mock_config_entry_data)
 
         mock_client = MagicMock()
         mock_client.get_property_values = AsyncMock(return_value=[{"name": "test"}])
         mock_esp_api.registry = MagicMock()
         mock_esp_api.registry.get_client.return_value = mock_client
+        mock_esp_api.parse_and_discover_entities = AsyncMock()
+        mock_esp_api.mark_discovery_completed = MagicMock()
 
         coordinator = ESPDataUpdateCoordinator(
             hass=hass,
@@ -990,9 +995,14 @@ class TestCoordinatorFetchDeviceProperties:
             config_entry=entry,
         )
 
-        result = await coordinator._fetch_device_properties()
+        await coordinator._discover_local_device()
 
-        assert result == [{"name": "test"}]
+        mock_esp_api.parse_and_discover_entities.assert_called_once_with(
+            TEST_NODE_ID,
+            [{"name": "test"}],
+            preferred_device_name=TEST_DEVICE_NAME,
+        )
+        mock_esp_api.mark_discovery_completed.assert_called_once_with(TEST_NODE_ID)
 
 
 class TestCoordinatorSetAvailable:
@@ -1081,3 +1091,509 @@ class TestCoordinatorSetAvailable:
         # Counters should be preserved (not reset on unavailable transition)
         assert coordinator._consecutive_failures == 2
         assert coordinator._reconnect_attempt == 1
+
+
+class TestDiscoverCloudDevice:
+    """Test _discover_cloud_device method."""
+
+    async def test_discover_cloud_device_success(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test successful cloud device discovery."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        node_config = {"devices": [{"name": "Light", "type": "esp.device.light"}]}
+        cloud_params = {"Light": {"power": True}}
+        mock_esp_api.get_cloud_node_config = AsyncMock(return_value=node_config)
+        mock_esp_api.get_cloud_params = AsyncMock(return_value=cloud_params)
+        mock_esp_api.discover_from_cloud = AsyncMock()
+        mock_esp_api.mark_discovery_completed = MagicMock()
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+
+        await coordinator._discover_cloud_device()
+
+        mock_esp_api.discover_from_cloud.assert_called_once_with(
+            TEST_NODE_ID, node_config, cloud_params, TEST_DEVICE_NAME
+        )
+        mock_esp_api.mark_discovery_completed.assert_called_once_with(TEST_NODE_ID)
+
+    async def test_discover_cloud_device_no_config(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test cloud discovery returns early when no config."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.get_cloud_node_config = AsyncMock(return_value=None)
+        mock_esp_api.discover_from_cloud = AsyncMock()
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+
+        await coordinator._discover_cloud_device()
+
+        mock_esp_api.discover_from_cloud.assert_not_called()
+
+    async def test_discover_cloud_device_no_devices_key(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test cloud discovery returns early when config has no 'devices' key."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.get_cloud_node_config = AsyncMock(return_value={"info": {}})
+        mock_esp_api.discover_from_cloud = AsyncMock()
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+
+        await coordinator._discover_cloud_device()
+
+        mock_esp_api.discover_from_cloud.assert_not_called()
+
+
+class TestPollCloudDeviceState:
+    """Test _poll_cloud_device_state method."""
+
+    async def test_poll_success_with_params(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test successful cloud polling with params."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        params = {"Light": {"power": True}}
+        mock_esp_api.get_cloud_params = AsyncMock(return_value=params)
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+
+        with patch(
+            "custom_components.esp_weaver.coordinator.fire_property_events"
+        ) as mock_fire:
+            result = await coordinator._poll_cloud_device_state()
+
+        assert result is True
+        mock_fire.assert_called_once_with(hass, TEST_NODE_ID, params)
+        assert coordinator._cloud_params_failures == 0
+
+    async def test_poll_no_params_under_threshold(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test cloud polling with no params stays available under threshold."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.get_cloud_params = AsyncMock(return_value=None)
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+
+        result = await coordinator._poll_cloud_device_state()
+
+        assert result is True
+        assert coordinator._cloud_params_failures == 1
+
+    async def test_poll_no_params_exceeds_threshold(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test cloud polling marks unavailable after threshold failures."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.get_cloud_params = AsyncMock(return_value=None)
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+        coordinator._cloud_params_failures = CLOUD_PARAMS_FAILURE_THRESHOLD - 1
+
+        result = await coordinator._poll_cloud_device_state()
+
+        assert result is False
+
+    async def test_poll_device_offline_returns_false(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test poll returns False when device is marked offline."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.is_cloud_device_online = AsyncMock(return_value=False)
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+        coordinator._cloud_device_offline = True
+
+        result = await coordinator._poll_cloud_device_state()
+
+        assert result is False
+
+    async def test_poll_triggers_connectivity_check(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test connectivity check triggered at poll interval."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.is_cloud_device_online = AsyncMock(return_value=False)
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+        coordinator._cloud_poll_count = CLOUD_CONNECTIVITY_CHECK_POLLS - 1
+
+        result = await coordinator._poll_cloud_device_state()
+
+        assert result is False
+        assert coordinator._cloud_poll_count == 0
+
+
+class TestCheckCloudConnectivity:
+    """Test _check_cloud_connectivity method."""
+
+    async def test_device_connected(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test device reported as connected."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.is_cloud_device_online = AsyncMock(return_value=True)
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+        coordinator._cloud_device_offline = True
+
+        result = await coordinator._check_cloud_connectivity()
+
+        assert result is True
+        assert coordinator._cloud_device_offline is False
+
+    async def test_device_disconnected(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test device reported as disconnected."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.is_cloud_device_online = AsyncMock(return_value=False)
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+
+        result = await coordinator._check_cloud_connectivity()
+
+        assert result is False
+        assert coordinator._cloud_device_offline is True
+
+    async def test_device_not_found(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test device not found in cloud account."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.is_cloud_device_online = AsyncMock(return_value=None)
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+
+        result = await coordinator._check_cloud_connectivity()
+
+        assert result is False
+        assert coordinator._cloud_device_offline is True
+
+
+class TestAsyncUpdateDataCloudPaths:
+    """Test cloud device paths in _async_update_data."""
+
+    async def test_update_triggers_cloud_discovery(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test that cloud device triggers cloud discovery path."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        node_config = {"devices": [{"name": "Light", "type": "esp.device.light"}]}
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
+        mock_esp_api.is_cloud_device = MagicMock(return_value=True)
+        mock_esp_api.get_cloud_node_config = AsyncMock(return_value=node_config)
+        mock_esp_api.get_cloud_params = AsyncMock(return_value={})
+        mock_esp_api.discover_from_cloud = AsyncMock()
+
+        discovery_state = {"completed": False}
+
+        def is_discovery_completed(node_id: str) -> bool:
+            return discovery_state["completed"]
+
+        def mark_discovery_completed(node_id: str) -> None:
+            discovery_state["completed"] = True
+
+        mock_esp_api.is_discovery_completed = MagicMock(
+            side_effect=is_discovery_completed
+        )
+        mock_esp_api.mark_discovery_completed = MagicMock(
+            side_effect=mark_discovery_completed
+        )
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+
+        result = await coordinator._async_update_data()
+
+        assert result["available"] is True
+        mock_esp_api.is_cloud_device.assert_called()
+        mock_esp_api.discover_from_cloud.assert_called_once()
+
+    async def test_update_cloud_poll_failure_marks_unavailable(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test that failed cloud polling marks device unavailable."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
+        mock_esp_api.is_discovery_completed = MagicMock(return_value=True)
+        mock_esp_api.is_cloud_device = MagicMock(return_value=True)
+        mock_esp_api.get_cloud_params = AsyncMock(return_value=None)
+        mock_esp_api.is_cloud_device_online = AsyncMock(return_value=False)
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+        # Force connectivity check to trigger and fail
+        coordinator._cloud_poll_count = CLOUD_CONNECTIVITY_CHECK_POLLS - 1
+
+        result = await coordinator._async_update_data()
+
+        assert result["available"] is False
+
+
+class TestDiscoverLocalDeviceEdgeCases:
+    """Test _discover_local_device edge cases."""
+
+    async def test_discover_local_empty_properties(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test discover exits early when properties are empty."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_client = MagicMock()
+        mock_client.get_property_values = AsyncMock(return_value=[])
+        mock_esp_api.registry = MagicMock()
+        mock_esp_api.registry.get_client.return_value = mock_client
+        mock_esp_api.parse_and_discover_entities = AsyncMock()
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+
+        await coordinator._discover_local_device()
+
+        mock_esp_api.parse_and_discover_entities.assert_not_called()
+
+
+class TestReconnectionErrorPaths:
+    """Test reconnection error handling paths."""
+
+    async def test_reconnection_cancelled_error(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test CancelledError is re-raised during reconnection."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.devices = {TEST_NODE_ID: {"ip": TEST_HOST, "port": TEST_PORT}}
+        mock_esp_api.is_device_available_async = AsyncMock(
+            side_effect=asyncio.CancelledError()
+        )
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+        coordinator._last_available = False
+
+        with pytest.raises(asyncio.CancelledError):
+            await coordinator._attempt_single_reconnection()
+
+    async def test_reconnection_unexpected_error(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test unexpected error during reconnection schedules next attempt."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.devices = {TEST_NODE_ID: {"ip": TEST_HOST, "port": TEST_PORT}}
+        mock_esp_api.is_device_available_async = AsyncMock(
+            side_effect=RuntimeError("unexpected")
+        )
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+        coordinator._last_available = False
+
+        result = await coordinator._attempt_single_reconnection()
+
+        assert result is False
+        assert coordinator._reconnect_in_progress is False
+
+    async def test_reconnection_network_error(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test network error during reconnection schedules next attempt."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        mock_esp_api.devices = {TEST_NODE_ID: {"ip": TEST_HOST, "port": TEST_PORT}}
+        mock_esp_api.is_device_available_async = AsyncMock(
+            side_effect=OSError("connection refused")
+        )
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+        coordinator._last_available = False
+
+        result = await coordinator._attempt_single_reconnection()
+
+        assert result is False
+
+    async def test_refresh_after_reconnect_handles_error(
+        self,
+        hass: HomeAssistant,
+        mock_esp_api: MagicMock,
+        mock_config_entry_data: dict[str, Any],
+    ) -> None:
+        """Test _refresh_after_reconnect handles errors gracefully."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+
+        coordinator = ESPDataUpdateCoordinator(
+            hass=hass,
+            api=mock_esp_api,
+            node_id=TEST_NODE_ID,
+            device_name=TEST_DEVICE_NAME,
+            config_entry=entry,
+        )
+
+        with patch.object(
+            coordinator, "async_refresh", side_effect=UpdateFailed("fail")
+        ):
+            await coordinator._refresh_after_reconnect()

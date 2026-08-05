@@ -79,32 +79,6 @@ class TestESPWeaverApiInit:
 class TestESPWeaverApiDeviceAvailability:
     """Test ESPWeaverApi device availability methods."""
 
-    def test_is_device_available_sync(
-        self,
-        api: ESPWeaverApi,
-    ) -> None:
-        """Test is_device_available sync method."""
-        # Register a device and set up a mock client
-        device = api.registry.register_device(TEST_NODE_ID, TEST_IP_ADDRESS)
-        device.registered = True
-
-        # Create mock client with required attributes
-        mock_client = MagicMock()
-        mock_client.session_established = True
-        mock_client.transport = MagicMock()
-        api.registry.set_client(TEST_NODE_ID, mock_client)
-
-        result = api.is_device_available(TEST_NODE_ID)
-        assert result is True
-
-    def test_is_device_available_not_found(
-        self,
-        api: ESPWeaverApi,
-    ) -> None:
-        """Test is_device_available for non-existent device."""
-        result = api.is_device_available("non_existent")
-        assert result is False
-
     async def test_is_device_available_async(
         self,
         api: ESPWeaverApi,
@@ -190,18 +164,18 @@ class TestESPWeaverApiEntityDiscovery:
 class TestESPWeaverApiPropertyOperations:
     """Test ESPWeaverApi property operations."""
 
-    async def test_set_local_ctrl_property(
+    async def test_set_property_local_device(
         self,
         api: ESPWeaverApi,
     ) -> None:
-        """Test set_local_ctrl_property method."""
+        """Test set_property dispatches to local control for local device."""
         with patch.object(
             api._property,
             "set_property",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_set:
-            result = await api.set_local_ctrl_property(TEST_NODE_ID, "power", True)
+            result = await api.set_property(TEST_NODE_ID, "power", True)
 
             assert result is True
             mock_set.assert_called_once_with(TEST_NODE_ID, "power", True)
@@ -519,7 +493,7 @@ class TestESPWeaverApiInternalMethods:
             ),
             patch.object(
                 api,
-                "set_local_ctrl_property",
+                "_set_local_property",
                 new_callable=AsyncMock,
                 return_value=True,
             ),
@@ -557,3 +531,214 @@ class TestESPWeaverApiInternalMethods:
             )
 
             assert result is False
+
+
+class TestCloudControl:
+    """Test cloud control methods."""
+
+    async def test_set_cloud_property_no_client(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test _set_cloud_property when no cloud client configured."""
+        result = await api._set_cloud_property(TEST_NODE_ID, "power", True)
+        assert result is False
+
+    async def test_set_cloud_property_success(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test _set_cloud_property success."""
+        mock_cloud_client = MagicMock()
+        mock_cloud_client.set_params = AsyncMock(return_value=True)
+        api.set_cloud_client(TEST_NODE_ID, mock_cloud_client)
+
+        result = await api._set_cloud_property(TEST_NODE_ID, "power", True)
+        assert result is True
+        mock_cloud_client.set_params.assert_called_once()
+
+    async def test_get_cloud_params_no_client(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test get_cloud_params when no cloud client configured."""
+        result = await api.get_cloud_params(TEST_NODE_ID)
+        assert result is None
+
+    async def test_get_cloud_params_success(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test get_cloud_params success."""
+        mock_cloud_client = MagicMock()
+        mock_cloud_client.get_params = AsyncMock(
+            return_value={"Light": {"power": True}}
+        )
+        api.set_cloud_client(TEST_NODE_ID, mock_cloud_client)
+
+        result = await api.get_cloud_params(TEST_NODE_ID)
+        assert result == {"Light": {"power": True}}
+
+    async def test_is_device_available_async_cloud_device(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test is_device_available_async for cloud device."""
+        mock_cloud_client = MagicMock()
+        mock_cloud_client.get_node_connectivity = AsyncMock(return_value=True)
+        api.set_cloud_client(TEST_NODE_ID, mock_cloud_client)
+        api.register_config_entry(TEST_NODE_ID, TEST_ENTRY_ID, "cloud")
+        api.register_cloud_device(TEST_NODE_ID)
+        result = await api.is_device_available_async(TEST_NODE_ID)
+        assert result is True
+
+    async def test_register_cloud_device(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test register_cloud_device."""
+        api.register_config_entry(TEST_NODE_ID, TEST_ENTRY_ID, "cloud")
+        api.register_cloud_device(TEST_NODE_ID)
+        assert api.is_cloud_device(TEST_NODE_ID) is True
+
+    async def test_is_cloud_device_not_registered(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test is_cloud_device for non-cloud device."""
+        assert api.is_cloud_device(TEST_NODE_ID) is False
+
+    async def test_set_cloud_property_build_command_fails(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test _set_cloud_property when command builder returns None."""
+        mock_cloud_client = MagicMock()
+        mock_cloud_client.set_params = AsyncMock(return_value=True)
+        api.set_cloud_client(TEST_NODE_ID, mock_cloud_client)
+
+        with patch(
+            "custom_components.esp_weaver.iot.client.device_api.build_device_command",
+            return_value=None,
+        ):
+            result = await api._set_cloud_property(TEST_NODE_ID, "invalid_prop", True)
+
+        assert result is False
+        mock_cloud_client.set_params.assert_not_called()
+
+    async def test_discover_from_cloud(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test discover_from_cloud method."""
+        with patch.object(
+            api._discovery,
+            "discover_from_cloud",
+            new_callable=AsyncMock,
+        ) as mock_discover:
+            await api.discover_from_cloud(
+                TEST_NODE_ID,
+                {"devices": []},
+                {"Light": {"power": True}},
+                "Test Device",
+            )
+
+            mock_discover.assert_called_once_with(
+                TEST_NODE_ID,
+                {"devices": []},
+                {"Light": {"power": True}},
+                "Test Device",
+            )
+
+    async def test_set_property_cloud_device(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test set_property for cloud device uses cloud control."""
+        mock_cloud_client = MagicMock()
+        mock_cloud_client.set_params = AsyncMock(return_value=True)
+        api.set_cloud_client(TEST_NODE_ID, mock_cloud_client)
+        api.register_config_entry(TEST_NODE_ID, TEST_ENTRY_ID, "cloud")
+
+        result = await api.set_property(TEST_NODE_ID, "power", True)
+
+        assert result is True
+        mock_cloud_client.set_params.assert_called_once()
+
+    async def test_set_property_local_success(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test set_property for local device succeeds."""
+        with patch.object(
+            api,
+            "_set_local_property",
+            new_callable=AsyncMock,
+            return_value=True,
+        ):
+            result = await api.set_property(TEST_NODE_ID, "power", True)
+
+        assert result is True
+
+    async def test_set_property_local_fails(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test set_property returns False when local control fails."""
+        with patch.object(
+            api,
+            "_set_local_property",
+            new_callable=AsyncMock,
+            return_value=False,
+        ):
+            result = await api.set_property(TEST_NODE_ID, "power", True)
+
+        assert result is False
+
+    async def test_reconnect_and_retry_property_retry_fails(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test _reconnect_and_retry_property when retry fails after reconnection."""
+        api.registry.register_device(TEST_NODE_ID, TEST_IP_ADDRESS, TEST_PORT)
+
+        with (
+            patch.object(
+                api._connection,
+                "connect_and_sync",
+                new_callable=AsyncMock,
+                return_value=(True, []),
+            ),
+            patch.object(
+                api,
+                "_set_local_property",
+                new_callable=AsyncMock,
+                return_value=False,  # Retry fails
+            ),
+        ):
+            result = await api._reconnect_and_retry_property(
+                TEST_NODE_ID, "power", True
+            )
+
+        assert result is False
+
+    async def test_register_device_connection_raises_exception(
+        self,
+        api: ESPWeaverApi,
+    ) -> None:
+        """Test register_device when connection raises exception."""
+        with (
+            patch.object(
+                api,
+                "_connect_and_sync_device",
+                new_callable=AsyncMock,
+                side_effect=OSError("Connection failed"),
+            ),
+            pytest.raises(OSError),
+        ):
+            await api.register_device(TEST_NODE_ID, TEST_IP_ADDRESS)
+
+        # Device should be marked as not registered
+        device = api.registry.get_device(TEST_NODE_ID)
+        assert device is not None
+        assert device.registered is False
