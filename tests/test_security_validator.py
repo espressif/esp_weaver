@@ -210,6 +210,7 @@ class TestPopConnection:
         """Create a security manager with mocked module and pre-cached security info."""
         mock_module = MagicMock()
         mock_module.get_transport = AsyncMock()
+        mock_module.get_sec_patch_ver = AsyncMock(return_value=0)
         mock_module.get_security = MagicMock()
         mock_module.establish_session = AsyncMock()
         mgr = ESPSecurityManager(mock_module)
@@ -459,6 +460,7 @@ class TestPopConnectionTransportCloseCoroutine:
         """Test transport.close() when it returns a coroutine in test_pop_connection."""
         mock_module = MagicMock()
         mock_module.get_transport = AsyncMock()
+        mock_module.get_sec_patch_ver = AsyncMock(return_value=0)
         mock_module.get_security = MagicMock()
         mock_module.establish_session = AsyncMock()
         manager = ESPSecurityManager(mock_module)

@@ -154,7 +154,7 @@ def get_security(
     if secver == 2:
         return security.Security2(sec_patch_ver, username, password, verbose=False)
     if secver == 1:
-        return security.Security1(pop, verbose=False)
+        return security.Security1(pop, verbose=False, sec_patch_ver=sec_patch_ver)
     if secver == 0:
         return security.Security0(verbose=False)
     return None
@@ -180,7 +180,7 @@ async def get_transport(sel_transport: str, service_name: str):
         return None
 
 
-async def get_sec_patch_ver(tp):
+async def get_sec_patch_ver(tp: "Transport") -> int | None:
     """Get security patch version from device."""
     try:
         response = await tp.send_data("esp_local_ctrl/version", "---")

@@ -45,17 +45,27 @@ class Security1(Security):
     - AES-256-CTR for data encryption
     """
 
-    def __init__(self, pop: str = "", verbose: bool = False):
+    def __init__(
+        self, pop: str = "", verbose: bool = False, sec_patch_ver: int | None = 0
+    ):
         """Initialize Security1.
 
         Args:
             pop: Proof of possession string.
             verbose: Enable verbose logging.
+            sec_patch_ver: Device's protocomm security1 patch version from the
+                ``esp_local_ctrl/version`` endpoint. ``>= 1`` = separate AES-CTR
+                keystreams for TX/RX (esp_weaver); ``0``/``None`` = single shared
+                keystream (stock protocomm, e.g. RainMaker).
         """
         # Initialize state of the security1 FSM
         self.session_state = SecurityState.REQUEST1
         self.pop = str_to_bytes(pop)
         self.verbose = verbose
+        # Default to a single shared stream (stock protocomm, e.g. RainMaker)
+        # when unknown, since that is the primary target.
+        self.sec_patch_ver = 0 if sec_patch_ver is None else sec_patch_ver
+        self._separate_streams = self.sec_patch_ver >= 1
         # Initialize keys and ciphers (set during handshake)
         self.client_private_key = None
         self.client_public_key = None
@@ -154,19 +164,31 @@ class Security1(Security):
             self._print_verbose(
                 f"Updated Shared Key (XORed with PoP):\t0x{shared_key.hex()}"
             )
-        # Initialize separate encryption and decryption engines
-        cipher_encrypt = Cipher(
-            algorithms.AES(shared_key),
-            modes.CTR(device_random),
-            backend=default_backend(),
-        )
-        cipher_decrypt = Cipher(
-            algorithms.AES(shared_key),
-            modes.CTR(device_random),
-            backend=default_backend(),
-        )
-        self.cipher_encrypt = cipher_encrypt.encryptor()
-        self.cipher_decrypt = cipher_decrypt.decryptor()
+        if self._separate_streams:
+            # esp_weaver: independent TX and RX keystreams, both from device_random.
+            cipher_encrypt = Cipher(
+                algorithms.AES(shared_key),
+                modes.CTR(device_random),
+                backend=default_backend(),
+            )
+            cipher_decrypt = Cipher(
+                algorithms.AES(shared_key),
+                modes.CTR(device_random),
+                backend=default_backend(),
+            )
+            self.cipher_encrypt = cipher_encrypt.encryptor()
+            self.cipher_decrypt = cipher_decrypt.decryptor()
+        else:
+            # Stock protocomm (e.g. RainMaker): one shared keystream for both
+            # directions, so encrypt and decrypt reuse the same CTR engine
+            # (AES-CTR is symmetric).
+            shared_engine = Cipher(
+                algorithms.AES(shared_key),
+                modes.CTR(device_random),
+                backend=default_backend(),
+            ).encryptor()
+            self.cipher_encrypt = shared_engine
+            self.cipher_decrypt = shared_engine
 
     def setup1_request(self):
         """Form SessionCmd1 request packet using encrypted device public key."""
@@ -195,8 +217,11 @@ class Security1(Security):
             # Read encrypted device verify string
             device_verify = setup_resp.sec1.sr1.device_verify_data
             self._print_verbose(f"Device Proof:\t0x{device_verify.hex()}")
-            # Synchronize decrypt offset to match where device encrypt started
-            self.cipher_decrypt.update(bytes(len(self.device_public_key)))
+            # Separate streams: RX keystream starts at 0, so skip one public-key
+            # length to align with the device's encrypt counter. Shared stream:
+            # already advanced by cmd1, so no skip.
+            if self._separate_streams:
+                self.cipher_decrypt.update(bytes(len(self.device_public_key)))
             enc_client_pubkey = self.cipher_decrypt.update(
                 setup_resp.sec1.sr1.device_verify_data
             )
