@@ -114,12 +114,30 @@ class ESPLocalCtrlClient:
                     _LOGGER.error("Failed to create transport for %s", service_name)
                     return False
 
-                # Create security context
+                # For both sec1 and sec2, detect the device's protocomm patch
+                # version (unencrypted /version endpoint) so our crypto matches
+                # the firmware. sec1: patch_ver 0 = shared TX/RX AES-CTR keystream
+                # (stock, e.g. RainMaker), 1 = separate (esp_weaver). sec2 uses
+                # it to select the AES-GCM IV variant.
+                sec_patch_ver = 0
+                if self.security_mode >= 1:
+                    detected = await local_ctrl.get_sec_patch_ver(self.transport)
+                    sec_patch_ver = detected if detected is not None else 0
+                    _LOGGER.debug(
+                        "Device %s reports sec_ver=%s sec_patch_ver=%s",
+                        self.node_id,
+                        self.security_mode,
+                        sec_patch_ver,
+                    )
+
+                # Called for all modes. sec2 (SRP6a) needs RainMaker's fixed
+                # username "wifiprov" with the PoP as password; sec0/sec1 use
+                # `pop` directly (username/password empty).
                 self.security_ctx = local_ctrl.get_security(
                     secver=self.security_mode,
-                    sec_patch_ver=0,
-                    username="",
-                    password="",
+                    sec_patch_ver=sec_patch_ver,
+                    username="wifiprov" if self.security_mode == 2 else "",
+                    password=(self.pop or "") if self.security_mode == 2 else "",
                     pop=self.pop or "",
                 )
 

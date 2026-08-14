@@ -763,9 +763,8 @@ class ESPWeaverConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 self._selected_device = selected_device
 
-                # Use already detected security version (from _detect_security_versions)
-                # security_version 1 requires PoP, security_version 0 does not
-                if selected_device.security_version == 1:
+                # sec1 (AES-CTR) and sec2 (SRP6a) both need a PoP; sec0 does not.
+                if selected_device.security_version in (1, 2):
                     return await self.async_step_pop_input()
 
                 return await self._create_entry_from_device()

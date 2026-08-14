@@ -259,6 +259,7 @@ class TestESPLocalCtrlClientConnect:
         ):
             mock_transport = MagicMock()
             mock_esp.get_transport = AsyncMock(return_value=mock_transport)
+            mock_esp.get_sec_patch_ver = AsyncMock(return_value=0)
             mock_esp.get_security = MagicMock(return_value=MagicMock())
             mock_esp.establish_session = AsyncMock(return_value=True)
 
@@ -298,6 +299,7 @@ class TestESPLocalCtrlClientConnect:
             "custom_components.esp_weaver.iot.client.client.local_ctrl"
         ) as mock_esp:
             mock_esp.get_transport = AsyncMock(return_value=MagicMock())
+            mock_esp.get_sec_patch_ver = AsyncMock(return_value=0)
             mock_esp.get_security = MagicMock(return_value=None)
 
             result = await client.connect()
@@ -314,6 +316,7 @@ class TestESPLocalCtrlClientConnect:
             "custom_components.esp_weaver.iot.client.client.local_ctrl"
         ) as mock_esp:
             mock_esp.get_transport = AsyncMock(return_value=MagicMock())
+            mock_esp.get_sec_patch_ver = AsyncMock(return_value=0)
             mock_esp.get_security = MagicMock(return_value=MagicMock())
             mock_esp.establish_session = AsyncMock(return_value=False)
 
@@ -1308,6 +1311,10 @@ class TestESPLocalCtrlClientConnectFullPath:
                 new_callable=AsyncMock,
             ) as mock_get_transport,
             patch(
+                "custom_components.esp_weaver.iot.client.client.local_ctrl.get_sec_patch_ver",
+                new_callable=AsyncMock,
+            ) as mock_get_patch_ver,
+            patch(
                 "custom_components.esp_weaver.iot.client.client.local_ctrl.get_security",
             ) as mock_get_security,
             patch(
@@ -1318,6 +1325,7 @@ class TestESPLocalCtrlClientConnectFullPath:
             patch.object(client, "_start_message_listener", new_callable=AsyncMock),
         ):
             mock_get_transport.return_value = mock_transport
+            mock_get_patch_ver.return_value = 0
             mock_get_security.return_value = mock_security_ctx
             mock_establish.return_value = True
 

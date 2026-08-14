@@ -175,11 +175,18 @@ class ESPSecurityManager:
                 if not transport:
                     return False
 
+                # Mirror the runtime connection: detect the patch version and,
+                # for sec2, use RainMaker's username "wifiprov" + PoP as password.
+                sec_patch_ver = 0
+                if secver >= 1:
+                    detected = await self._local_ctrl.get_sec_patch_ver(transport)
+                    sec_patch_ver = detected if detected is not None else 0
+
                 security_ctx = self._local_ctrl.get_security(
                     secver=secver,
-                    sec_patch_ver=None,
-                    username=None,
-                    password=None,
+                    sec_patch_ver=sec_patch_ver,
+                    username="wifiprov" if secver == 2 else "",
+                    password=(pop or "") if secver == 2 else "",
                     pop=pop or "",
                 )
 
