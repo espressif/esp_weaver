@@ -2,21 +2,14 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""ESP RainMaker Cloud Client using esp-rainmaker-cli commands.
+"""Cloud control, driven by shelling out to esp-rainmaker-cli.
 
-This module provides a client for communicating with ESP RainMaker cloud
-by invoking esp-rainmaker-cli commands via subprocess.
+Cloud control is not supported in this release: ``CLOUD_CONTROL_ENABLED`` is
+False, so the config flow does not offer it and nothing here is a declared
+dependency.
 
-Features:
-- Login/logout management
-- Device provisioning via BLE (with automatic node mapping)
-- Device parameter get/set
-- Automatic profile (region) support
-- Auto-install esp-rainmaker-cli on first use
-
-Dependencies:
-- esp-secure-cert-tool>=2.0.0 (declared in manifest.json, no cryptography conflict)
-- esp-rainmaker-cli (auto-installed with --no-deps to avoid cryptography conflict)
+RainMaker has no Python client Home Assistant can depend on, so every operation
+is a CLI subprocess and the CLI's own token store keeps the login.
 """
 
 import asyncio
@@ -30,22 +23,82 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import Any
+import sysconfig
+import threading
+from typing import Any, Final
+
+from ..specs.keys import RAINMAKER_REGION_CHINA, RAINMAKER_REGION_GLOBAL
 
 _LOGGER = logging.getLogger(__name__)
 
-# CLI command name
-CLI_CMD = "esp-rainmaker-cli"
+CLI_CMD: Final[str] = "esp-rainmaker-cli"
+PASSWORD_ENV: Final[str] = "ESP_RAINMAKER_PASSWORD"
 
-# Flag to track if installation has been attempted this session
+# What to tell a user whose environment we cannot install into.
+INSTALL_INSTRUCTIONS: Final[str] = (
+    f"Cloud control needs {CLI_CMD}, which is not installed and cannot be "
+    f"installed into this environment. Install it where Home Assistant runs "
+    f"with: pip install {CLI_CMD} --no-deps"
+)
+
+# One install attempt per run, and one at a time: the first cloud device to be
+# set up would otherwise race every other one into a duplicate pip install.
+_install_lock = threading.Lock()
 _install_attempted = False
 
-# Pre-compiled regex for stripping ANSI escape codes from CLI output
-_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+_ANSI_ESCAPE_RE: Final = re.compile(r"\x1b\[[0-9;]*m")
+
+# Provisioning waits for a person at a phone and a device joining a network,
+# both of which are slow, and there is no second attempt if it is cut short.
+PROVISION_TIMEOUT: Final[int] = 180
+INSTALL_TIMEOUT: Final[int] = 120
+LOGIN_TIMEOUT: Final[int] = 60
+DEFAULT_CLI_TIMEOUT: Final[int] = 30
+NODE_QUERY_TIMEOUT: Final[int] = 15
+STATUS_TIMEOUT: Final[int] = 10
+
+# Everything the CLI says when the stored login has gone stale.
+LOGIN_FAILURE_SIGNS: Final[tuple[str, ...]] = (
+    "invalid configuration",
+    "please login",
+    "login first",
+    "not logged in",
+    "unauthorized",
+    "no user",
+    "no valid access token",
+    "no valid tokens",
+)
+
+
+def _says_login_expired(text: str) -> bool:
+    """Say whether some CLI output is really about the login rather than the task."""
+    lowered = text.lower()
+    return any(sign in lowered for sign in LOGIN_FAILURE_SIGNS)
+
+
+# How ``getuserinfo`` names the account: ``User Name (email): a@b.c``.
+_SIGNED_IN_EMAIL_RE: Final = re.compile(
+    r"^\s*user\s*name(?:\s*\(email\))?\s*:\s*(?P<email>\S+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _signed_in_email(output: str) -> str | None:
+    """Return the account ``getuserinfo`` says it is signed in as, if it names one."""
+    match = _SIGNED_IN_EMAIL_RE.search(_ANSI_ESCAPE_RE.sub("", output))
+    return match.group("email").lower() if match else None
+
+
+def _says_wifi_succeeded(output: str) -> bool:
+    """Say whether the CLI reported the WiFi half as done, in either wording."""
+    return (
+        "Wi-Fi Provisioning Successful" in output
+        or "provisioned successfully" in output.lower()
+    )
 
 
 def _check_cli_installed() -> bool:
-    """Check if esp-rainmaker-cli is installed."""
+    """Say whether the CLI is on PATH."""
     return shutil.which(CLI_CMD) is not None
 
 
@@ -53,18 +106,10 @@ _proto_fix_env: dict[str, str] | None = None
 
 
 def _get_proto_fix_env() -> dict[str, str]:
-    """Get environment variables to fix proto module conflict in subprocess.
+    """Return the environment the CLI needs to import its own ``proto`` package.
 
-    Home Assistant uses proto-plus which provides a 'proto' module.
-    esp-rainmaker-cli uses rmaker_tools which has its own internal 'proto' directory.
-    When 'import proto' is executed, Python finds proto-plus's proto instead.
-
-    This function returns env vars to prepend rmaker_tools/rmaker_prov to PYTHONPATH,
-    so the subprocess finds the correct proto module without affecting the main process.
-    The result is cached after the first call.
-
-    Returns:
-        Dict with environment variables including modified PYTHONPATH.
+    Home Assistant's proto-plus owns the name ``proto``; the CLI's rmaker_tools
+    goes first on PYTHONPATH for the subprocess.
     """
     global _proto_fix_env  # noqa: PLW0603  # pylint: disable=global-statement
     if _proto_fix_env is not None:
@@ -85,121 +130,109 @@ def _get_proto_fix_env() -> dict[str, str]:
 
     except ImportError:
         _LOGGER.debug("rmaker_tools not installed, proto fix not needed")
-    except Exception as err:  # noqa: BLE001  # pylint: disable=broad-exception-caught
-        _LOGGER.warning("Failed to get proto fix env: %s", err)
 
     _proto_fix_env = env
     return env
 
 
 def _install_cli() -> bool:
-    """Install esp-rainmaker-cli with --no-deps to avoid cryptography conflict.
+    """Install the CLI once per run, with ``--no-deps``.
 
-    The esp-rainmaker-cli package requires esp-secure-cert-tool==1.0.1 which
-    depends on cryptography==36.0.0. This conflicts with Home Assistant's
-    cryptography>=46.0.2.
-
-    Solution: Install esp-rainmaker-cli with --no-deps, and use the newer
-    esp-secure-cert-tool>=2.0.0 (declared in manifest.json) which doesn't
-    have the cryptography version conflict.
-
-    Returns:
-        True if installation succeeded, False otherwise.
+    Its pins would undo Home Assistant's ``cryptography``; what it needs is
+    declared in manifest.json instead.
     """
     global _install_attempted  # noqa: PLW0603  # pylint: disable=global-statement
-    if _install_attempted:
-        return _check_cli_installed()
 
-    _install_attempted = True
-    _LOGGER.info("Installing %s (first time setup)...", CLI_CMD)
+    # Held across the install, so a second device setting up waits for the
+    # answer instead of starting its own pip.
+    with _install_lock:
+        if _install_attempted:
+            return _check_cli_installed()
+        _install_attempted = True
 
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", CLI_CMD, "--no-deps", "-q"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
+        if not _environment_is_writable():
+            # pip would spend the timeout failing with a permissions message.
+            _LOGGER.error("%s", INSTALL_INSTRUCTIONS)
+            return False
+
+        _LOGGER.info("Installing %s (first time setup)...", CLI_CMD)
+
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", CLI_CMD, "--no-deps", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=INSTALL_TIMEOUT,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            _LOGGER.error("Installation of %s timed out", CLI_CMD)
+            return False
+        except OSError as err:
+            _LOGGER.error("Failed to install %s: %s", CLI_CMD, err)
+            return False
+
+        if result.returncode == 0:
+            _LOGGER.info("%s installed successfully", CLI_CMD)
+            return True
+
+        _LOGGER.error(
+            "Failed to install %s: %s. %s",
+            CLI_CMD,
+            result.stderr,
+            INSTALL_INSTRUCTIONS,
         )
-    except subprocess.TimeoutExpired:
-        _LOGGER.error("Installation of %s timed out", CLI_CMD)
-        return False
-    except Exception as err:  # noqa: BLE001  # pylint: disable=broad-exception-caught
-        _LOGGER.error("Failed to install %s: %s", CLI_CMD, err)
         return False
 
-    if result.returncode == 0:
-        _LOGGER.info("%s installed successfully", CLI_CMD)
-        return True
 
-    _LOGGER.error("Failed to install %s: %s", CLI_CMD, result.stderr)
-    return False
+def _environment_is_writable() -> bool:
+    """Return True if this Python environment can have packages added to it.
+
+    Home Assistant is often a read-only container; asking first turns a
+    two-minute failure into an immediate message.
+    """
+    target = Path(sysconfig.get_path("purelib"))
+    return os.access(target, os.W_OK)
 
 
 def _ensure_cli_available() -> bool:
-    """Ensure esp-rainmaker-cli is available, installing if necessary.
-
-    Returns:
-        True if CLI is available, False otherwise.
-    """
-    if _check_cli_installed():
-        return True
-    return _install_cli()
+    """Return whether the CLI can be run, installing it if this is the first ask."""
+    return _check_cli_installed() or _install_cli()
 
 
 @dataclass
 class CloudDeviceInfo:
-    """Information about a cloud device."""
+    """One node as the RainMaker account lists it."""
 
     node_id: str
     name: str
     connected: bool = False
 
 
-@dataclass
-class BLEDeviceInfo:
-    """Information about a BLE device for provisioning."""
-
-    name: str
-
-
 class RainMakerCLIClient:
-    """Client for ESP RainMaker using esp-rainmaker-cli commands.
+    """Every RainMaker operation, each one a run of the CLI."""
 
-    All operations are performed by invoking CLI commands via subprocess.
-    """
-
-    def __init__(self, region: str = "global") -> None:
-        """Initialize the CLI client.
-
-        Args:
-            region: Region for API ('global' or 'china').
-        """
+    def __init__(self, region: str = RAINMAKER_REGION_GLOBAL) -> None:
+        """Bind this client to one region, which the CLI calls a profile."""
         self._region = region
-        self._profile = "china" if region == "china" else "global"
+        self._profile = (
+            RAINMAKER_REGION_CHINA
+            if region == RAINMAKER_REGION_CHINA
+            else RAINMAKER_REGION_GLOBAL
+        )
 
     def _run_cli(
         self,
         args: list[str],
-        timeout: int = 30,
+        timeout: int = DEFAULT_CLI_TIMEOUT,
+        extra_env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Run CLI command and return result.
-
-        Args:
-            args: Command arguments (without the main command).
-            timeout: Command timeout in seconds.
-
-        Returns:
-            Dict with 'success', 'output', and optionally 'error'.
-        """
+        """Run one CLI command, returning its success, output and error."""
         if not _ensure_cli_available():
-            return {
-                "success": False,
-                "error": f"{CLI_CMD} not available and auto-install failed",
-            }
+            return {"success": False, "error": INSTALL_INSTRUCTIONS}
 
         cmd = [CLI_CMD, *args, "--profile", self._profile]
-        env = _get_proto_fix_env()
+        env = {**_get_proto_fix_env(), **(extra_env or {})}
 
         try:
             result = subprocess.run(
@@ -212,7 +245,7 @@ class RainMakerCLIClient:
             )
         except subprocess.TimeoutExpired:
             return {"success": False, "error": f"Command timed out after {timeout}s"}
-        except Exception as err:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        except (OSError, ValueError) as err:
             return {"success": False, "error": str(err)}
 
         output = result.stdout.strip()
@@ -225,29 +258,23 @@ class RainMakerCLIClient:
     async def _run_cli_async(
         self,
         args: list[str],
-        timeout: int = 30,
+        timeout: int = DEFAULT_CLI_TIMEOUT,
+        extra_env: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Run CLI command asynchronously."""
+        """Run one CLI command off the event loop."""
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None,
-            partial(self._run_cli, args, timeout),
+            partial(self._run_cli, args, timeout, extra_env),
         )
 
-    # =========================================================================
-    # Authentication (认证)
-    # =========================================================================
-
     async def _ensure_profile_active(self) -> None:
-        """Ensure the CLI's active profile matches our target profile.
+        """Write the region into the ``current_profile`` file.
 
-        Only needed for non-global profiles.  The CLI's ``provision`` command
-        creates ``Config()`` without ``profile_override``, so it falls back to
-        ``current_profile`` file (default: 'global').  For 'china' profile
-        this would be wrong, so we write the file explicitly.
+        ``provision`` is the one command without a profile override, so it
+        reads that file; written for every region so an earlier China client
+        cannot leave it wrong.
         """
-        if self._profile == "global":
-            return
 
         def _write_profile() -> None:
             profiles_dir = Path.home() / ".espressif" / "rainmaker" / "profiles"
@@ -260,7 +287,7 @@ class RainMakerCLIClient:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, _write_profile)
             _LOGGER.debug("CLI active profile set to '%s'", self._profile)
-        except Exception as err:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        except OSError as err:
             _LOGGER.warning(
                 "Failed to set CLI active profile to '%s': %s",
                 self._profile,
@@ -268,24 +295,16 @@ class RainMakerCLIClient:
             )
 
     async def login(self, email: str, password: str) -> dict[str, Any]:
-        """Login to RainMaker using CLI.
+        """Log the CLI into one RainMaker account, and confirm that it took.
 
-        Args:
-            email: User email.
-            password: User password.
-
-        Returns:
-            Dict with login result.
-
-        Note:
-            Password is passed via --password flag to use the CLI's direct
-            (programmatic) login path, bypassing the interactive prompt.
+        The password travels in the environment, not on the command line.
         """
         await self._ensure_profile_active()
 
         result = await self._run_cli_async(
-            ["login", "--email", email, "--password", password],
-            timeout=60,
+            ["login", "--email", email],
+            timeout=LOGIN_TIMEOUT,
+            extra_env={PASSWORD_ENV: password},
         )
 
         if not result.get("success"):
@@ -311,39 +330,37 @@ class RainMakerCLIClient:
         return {"success": True, "email": email, "region": self._region}
 
     async def check_login_status(self) -> dict[str, Any]:
-        """Check if logged in by trying to get user info.
+        """Ask the CLI who it is logged in as.
 
-        Note: The CLI's ``getuserinfo`` command catches exceptions internally
-        and may exit with returncode 0 even when NOT logged in.  We must
-        inspect the output text to detect "not logged in" indicators.
+        Read from the output, not the exit code: ``getuserinfo`` exits 0 even
+        when it reports nobody logged in.
+
+        Returns:
+            ``logged_in``, and the session's ``email`` when there is one.
         """
-        result = await self._run_cli_async(["getuserinfo"], timeout=10)
+        result = await self._run_cli_async(["getuserinfo"], timeout=STATUS_TIMEOUT)
 
         output = result.get("output", "")
         error = result.get("error", "")
-        combined = (output + " " + error).lower()
 
-        not_logged_in_indicators = [
-            "not logged in",
-            "unauthorized",
-            "invalid configuration",
-            "please login",
-            "login first",
-            "no user",
-            "no valid tokens",
-        ]
-
-        for indicator in not_logged_in_indicators:
-            if indicator in combined:
-                _LOGGER.debug(
-                    "check_login_status: detected '%s' in CLI output", indicator
-                )
-                return {"logged_in": False, "error": "Not logged in"}
+        if _says_login_expired(f"{output} {error}"):
+            _LOGGER.debug("check_login_status: CLI output reports no valid login")
+            return {"logged_in": False, "error": "Not logged in"}
 
         if result.get("success"):
-            return {"logged_in": True}
+            return {"logged_in": True, "email": _signed_in_email(output)}
 
         return {"logged_in": False, "error": result.get("error", "Unknown error")}
+
+    async def logout(self) -> None:
+        """End the CLI's session for this region, if it has one.
+
+        ``login`` prompts on the terminal about an existing session, and there
+        is no terminal here. Failure is not an error.
+        """
+        result = await self._run_cli_async(["logout"], timeout=STATUS_TIMEOUT)
+        if not result.get("success"):
+            _LOGGER.debug("RainMaker logout reported: %s", result.get("error"))
 
     async def check_health(self) -> bool:
         """Check if RainMaker API is accessible."""
@@ -351,16 +368,15 @@ class RainMakerCLIClient:
         return bool(status.get("logged_in", False))
 
     async def get_node_connectivity(self, node_id: str) -> bool | None:
-        """Check if a specific node is connected to the cloud.
-
-        Uses ``getnodedetails <nodeid> --raw`` to query a single node
-        instead of fetching the full device list.
+        """Ask about one node rather than fetching the whole account's list.
 
         Returns:
-            True if connected, False if disconnected, None if node not found.
+            True or False for the node's connectivity; None if nothing is known
+            (node missing, login expired, unreadable answer - the CLI reports
+            all three the same way).
         """
         result = await self._run_cli_async(
-            ["getnodedetails", node_id, "--raw"], timeout=15
+            ["getnodedetails", node_id, "--raw"], timeout=NODE_QUERY_TIMEOUT
         )
 
         if not result.get("success"):
@@ -378,23 +394,24 @@ class RainMakerCLIClient:
         except json.JSONDecodeError:
             return None
 
-        # Response is {"node_details": [{...}]} for single-node query
-        details = data.get("node_details", [data] if isinstance(data, dict) else data)
-        if not details:
+        # A single-node query answers {"node_details": [{...}]}; older CLIs
+        # answer with the detail itself, or a list of them.
+        details = data.get("node_details", [data]) if isinstance(data, dict) else data
+        if not isinstance(details, list) or not details:
             return None
 
-        detail = details[0] if isinstance(details, list) else details
+        detail = details[0]
+        if not isinstance(detail, dict):
+            return None
         return bool(
             detail.get("status", {}).get("connectivity", {}).get("connected", False)
         )
 
-    # =========================================================================
-    # Device List (设备列表)
-    # =========================================================================
-
     async def get_rainmaker_devices(self) -> list[CloudDeviceInfo]:
         """Get list of RainMaker devices."""
-        result = await self._run_cli_async(["getnodedetails", "--raw"], timeout=30)
+        result = await self._run_cli_async(
+            ["getnodedetails", "--raw"], timeout=DEFAULT_CLI_TIMEOUT
+        )
 
         if not result.get("success"):
             _LOGGER.error("Failed to get devices: %s", result.get("error"))
@@ -410,15 +427,13 @@ class RainMakerCLIClient:
 
         try:
             data = json.loads(json_output)
-            if isinstance(data, dict) and "node_details" in data:
+            details = data.get("node_details", []) if isinstance(data, dict) else data
+            if isinstance(details, list):
                 devices.extend(
                     d
-                    for detail in data["node_details"]
-                    if (d := self._parse_node_detail(detail))
-                )
-            elif isinstance(data, list):
-                devices.extend(
-                    d for detail in data if (d := self._parse_node_detail(detail))
+                    for detail in details
+                    if isinstance(detail, dict)
+                    and (d := self._parse_node_detail(detail))
                 )
         except json.JSONDecodeError as e:
             _LOGGER.debug("JSON parse failed: %s. Output: %s", e, json_output[:500])
@@ -445,7 +460,8 @@ class RainMakerCLIClient:
             detail.get("status", {}).get("connectivity", {}).get("connected", False)
         )
 
-        device_name = f"RainMaker Device {node_id[:8]}"
+        # Not a vendor's name, and not the node id: see OTHER_DEVICE_LABEL.
+        device_name = "Other device"
 
         # Priority: config.devices[0].name > config.info.name > default
         if config := detail.get("config"):
@@ -485,14 +501,7 @@ class RainMakerCLIClient:
         )
 
     def _extract_json_from_output(self, output: str) -> str:
-        """Extract JSON content from CLI output, skipping non-JSON lines.
-
-        CLI output may include:
-        - Lines like "Using profile: global" before JSON
-        - ANSI color codes like [1m, [32m, [0m
-
-        This method removes ANSI codes and finds the first '{' or '['.
-        """
+        """Extract the JSON from CLI output, past ANSI codes and prefix lines."""
         clean_output = _ANSI_ESCAPE_RE.sub("", output)
 
         json_start = -1
@@ -506,15 +515,11 @@ class RainMakerCLIClient:
 
         return clean_output[json_start:]
 
-    # =========================================================================
-    # Device Details & Parameters (设备详情和参数)
-    # =========================================================================
-
     async def get_node_details(self, node_id: str) -> dict[str, Any] | None:
         """Get details for a specific node."""
         result = await self._run_cli_async(
             ["getnodeconfig", node_id],
-            timeout=30,
+            timeout=DEFAULT_CLI_TIMEOUT,
         )
 
         if not result.get("success"):
@@ -538,7 +543,7 @@ class RainMakerCLIClient:
         """Get parameters for a node."""
         result = await self._run_cli_async(
             ["getparams", node_id],
-            timeout=15,
+            timeout=NODE_QUERY_TIMEOUT,
         )
 
         if not result.get("success"):
@@ -559,7 +564,7 @@ class RainMakerCLIClient:
         params_json = json.dumps(params)
         result = await self._run_cli_async(
             ["setparams", node_id, "--data", params_json],
-            timeout=15,
+            timeout=NODE_QUERY_TIMEOUT,
         )
 
         if not result.get("success"):
@@ -567,10 +572,6 @@ class RainMakerCLIClient:
             return False
 
         return True
-
-    # =========================================================================
-    # BLE Provisioning (BLE 配网)
-    # =========================================================================
 
     async def provision_device(
         self,
@@ -580,27 +581,21 @@ class RainMakerCLIClient:
         pop: str = "",
         transport: str = "ble",
     ) -> dict[str, Any]:
-        """Provision an ESP device with WiFi credentials and add to account.
+        """Provision a device over BLE with WiFi credentials and add it to the account.
 
-        The CLI handles the complete provisioning flow:
-        1. Connect to device via BLE
-        2. Send WiFi credentials
-        3. Wait for device to connect to WiFi
-        4. Wait for node mapping confirmation (device added to account)
+        Known limits of the CLI: the WiFi password goes on its command line
+        (visible to other processes while the run lasts; there is no terminal
+        to prompt on), and it opens the Bluetooth adapter itself, uncoordinated
+        with Home Assistant's Bluetooth integration.
 
         Args:
-            device_name: BLE device name (e.g., "PROV_XXXXXX").
-            ssid: WiFi SSID.
-            wifi_password: WiFi password.
-            pop: Proof of Possession (if required).
-            transport: Transport type ("ble" or "softap").
+            device_name: BLE device name, e.g. ``PROV_XXXXXX``.
+            pop: Proof of possession, if the device needs one.
+            transport: ``ble`` or ``softap``.
 
         Returns:
-            Dict with provisioning result:
-            - success: True if provisioning succeeded
-            - node_id: Device node ID
-            - bound: True if device was added to user account
-            - message: Status message
+            ``success``, ``node_id``, ``bound`` (added to the account) and
+            ``message``.
         """
         await self._ensure_profile_active()
 
@@ -628,47 +623,52 @@ class RainMakerCLIClient:
             transport,
             ssid,
         )
-        result = await self._run_cli_async(cmd, timeout=180)
+        result = await self._run_cli_async(cmd, timeout=PROVISION_TIMEOUT)
 
         output = result.get("output", "") + "\n" + result.get("error", "")
         _LOGGER.debug("Provision CLI output: %s", output[:2000])
 
+        # The CLI can fail overall and still have got the device onto the
+        # WiFi, which cannot be repeated; read its output too.
         cli_success = result.get("success")
-        wifi_success = not cli_success and (
-            "Wi-Fi Provisioning Successful" in output
-            or "provisioned successfully" in output.lower()
-        )
+        wifi_success = not cli_success and _says_wifi_succeeded(output)
 
         if cli_success or wifi_success:
-            node_id = self._extract_node_id(output)
-            bound = self._check_bound(output)
-            if cli_success:
-                _LOGGER.info(
-                    "Provisioning successful: node_id=%s, bound=%s", node_id, bound
-                )
-            else:
-                _LOGGER.warning(
-                    "Provisioning partially successful: WiFi OK, bound=%s", bound
-                )
-            return {
-                "success": True,
-                "device_name": device_name,
-                "node_id": node_id,
-                "bound": bound,
-                "message": "Device provisioned"
-                + (" and added to account" if bound else ""),
-            }
+            return self._provisioned(device_name, output, unbound=not cli_success)
 
+        return self._provision_failed(result, output)
+
+    def _provisioned(
+        self, device_name: str, output: str, *, unbound: bool
+    ) -> dict[str, Any]:
+        """Report a device that is on the WiFi, bound to the account or not."""
+        node_id = self._extract_node_id(output)
+        bound = self._check_bound(output)
+
+        if unbound:
+            _LOGGER.warning(
+                "Provisioning partially successful: WiFi OK, bound=%s", bound
+            )
+        else:
+            _LOGGER.info(
+                "Provisioning successful: node_id=%s, bound=%s", node_id, bound
+            )
+
+        return {
+            "success": True,
+            "device_name": device_name,
+            "node_id": node_id,
+            "bound": bound,
+            "message": "Device provisioned"
+            + (" and added to account" if bound else ""),
+        }
+
+    @staticmethod
+    def _provision_failed(result: dict[str, Any], output: str) -> dict[str, Any]:
+        """Report a failed run, telling an expired login apart from a device problem."""
         error = result.get("error", "") or "Provisioning failed"
 
-        login_error_indicators = [
-            "invalid configuration",
-            "please login",
-            "not logged in",
-            "no valid access token",
-        ]
-        output_lower = output.lower()
-        if any(ind in output_lower for ind in login_error_indicators):
+        if _says_login_expired(output):
             _LOGGER.error("Provisioning failed due to login issue: %s", error)
             return {
                 "success": False,

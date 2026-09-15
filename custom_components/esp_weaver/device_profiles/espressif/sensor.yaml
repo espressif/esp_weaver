@@ -1,0 +1,425 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: sensor
+product_label: "Environment sensor"
+product_labels:
+  zh-Hans: "环境传感器"
+model: "*"
+
+devices:
+  # This parameter set follows the ESP-Weaver example environmental sensor
+  # firmware. Each reported measurement becomes a sensor, while writable
+  # thresholds and sampling settings become configuration entities.
+  - type: esp.device.sensor
+    entities:
+      # The example firmware reports Temperature as a separate measurement from
+      # Ambient Temperature, although both have the same Home Assistant semantics.
+      - platform: sensor
+        name: "Temperature"
+        key: temperature
+        device_class: temperature
+        state_class: measurement
+        unit: "°C"
+        display_precision: 1
+        attributes:
+          state:
+            param: "Temperature"
+            type: esp.param.temperature
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+
+      # The firmware's temp-prefixed thresholds apply to Ambient Temperature,
+      # not to the separate Temperature measurement.
+      - platform: sensor
+        name: "Ambient Temperature"
+        key: ambient_temperature
+        device_class: temperature
+        state_class: measurement
+        unit: "°C"
+        display_precision: 1
+        attributes:
+          state:
+            param: "Ambient Temperature"
+            type: esp.param.temperature
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+
+      - platform: sensor
+        name: "Humidity"
+        key: humidity
+        device_class: humidity
+        state_class: measurement
+        unit: "%"
+        display_precision: 1
+        attributes:
+          state:
+            param: "Humidity"
+            type: esp.param.humidity
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+
+      - platform: sensor
+        name: "Ambient Humidity"
+        key: ambient_humidity
+        device_class: humidity
+        state_class: measurement
+        unit: "%"
+        display_precision: 1
+        attributes:
+          state:
+            param: "Ambient Humidity"
+            type: esp.param.humidity
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+
+      # Firmware may enable RainMaker cloud time-series storage independently.
+      # Home Assistant long-term statistics are controlled by state_class.
+      - platform: sensor
+        name: "Illuminance"
+        key: illuminance
+        device_class: illuminance
+        state_class: measurement
+        unit: "lx"
+        display_precision: 0
+        attributes:
+          state:
+            param: "Illuminance"
+            type: esp.param.custom.illuminance
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+
+      - platform: sensor
+        name: "Pressure"
+        key: pressure
+        device_class: atmospheric_pressure
+        state_class: measurement
+        unit: "hPa"
+        display_precision: 1
+        attributes:
+          state:
+            param: "Pressure"
+            type: esp.param.pressure
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+
+      # The example firmware reports CO2, VOC, and PM25 measurements as integers
+      # but accepts floating-point thresholds for them.
+      - platform: sensor
+        name: "CO2"
+        key: co2
+        device_class: carbon_dioxide
+        state_class: measurement
+        unit: "ppm"
+        display_precision: 0
+        attributes:
+          state:
+            param: "CO2"
+            type: esp.param.co2
+            data_type: int
+            ui_type: esp.ui.text
+            properties: [read]
+
+      - platform: sensor
+        name: "VOC"
+        key: voc
+        device_class: volatile_organic_compounds
+        state_class: measurement
+        unit: "μg/m³"
+        display_precision: 0
+        attributes:
+          state:
+            param: "VOC"
+            type: esp.param.voc
+            data_type: int
+            ui_type: esp.ui.text
+            properties: [read]
+
+      # The display name uses the conventional PM2.5 notation, while the
+      # firmware parameter is named PM25.
+      - platform: sensor
+        name: "PM2.5"
+        key: pm25
+        device_class: pm25
+        state_class: measurement
+        unit: "μg/m³"
+        display_precision: 0
+        attributes:
+          state:
+            param: "PM25"
+            type: esp.param.pm25
+            data_type: int
+            ui_type: esp.ui.text
+            properties: [read]
+
+      # Home Assistant has no number device classes for illuminance or air
+      # quality thresholds, so assigning one would make those entities invalid.
+      - platform: number
+        name: "Temperature Min Threshold"
+        key: temperature_min_threshold
+        threshold: { of: ambient_temperature, end: min }
+        icon: mdi:thermometer-minus
+        device_class: temperature
+        entity_category: config
+        unit: "°C"
+        attributes:
+          value:
+            param: "temp_min_threshold"
+            type: esp.param.config.temp_min_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: -20.0, max: 40.0, step: 0.5 }
+
+      - platform: number
+        name: "Temperature Max Threshold"
+        key: temperature_max_threshold
+        threshold: { of: ambient_temperature, end: max }
+        icon: mdi:thermometer-plus
+        device_class: temperature
+        entity_category: config
+        unit: "°C"
+        attributes:
+          value:
+            param: "temp_max_threshold"
+            type: esp.param.config.temp_max_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: -10.0, max: 60.0, step: 0.5 }
+
+      - platform: number
+        name: "Humidity Min Threshold"
+        key: humidity_min_threshold
+        threshold: { of: ambient_humidity, end: min }
+        icon: mdi:water-minus
+        device_class: humidity
+        entity_category: config
+        unit: "%"
+        attributes:
+          value:
+            param: "humidity_min_threshold"
+            type: esp.param.config.humidity_min_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 0.0, max: 60.0, step: 1.0 }
+
+      - platform: number
+        name: "Humidity Max Threshold"
+        key: humidity_max_threshold
+        threshold: { of: ambient_humidity, end: max }
+        icon: mdi:water-plus
+        device_class: humidity
+        entity_category: config
+        unit: "%"
+        attributes:
+          value:
+            param: "humidity_max_threshold"
+            type: esp.param.config.humidity_max_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 40.0, max: 100.0, step: 1.0 }
+
+      - platform: number
+        name: "Illuminance Min Threshold"
+        key: illuminance_min_threshold
+        threshold: { of: illuminance, end: min }
+        icon: mdi:brightness-5
+        entity_category: config
+        unit: "lx"
+        attributes:
+          value:
+            param: "illuminance_min_threshold"
+            type: esp.param.config.illuminance_min_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 0.0, max: 500.0, step: 10.0 }
+
+      - platform: number
+        name: "Illuminance Max Threshold"
+        key: illuminance_max_threshold
+        threshold: { of: illuminance, end: max }
+        icon: mdi:brightness-7
+        entity_category: config
+        unit: "lx"
+        attributes:
+          value:
+            param: "illuminance_max_threshold"
+            type: esp.param.config.illuminance_max_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 100.0, max: 10000.0, step: 50.0 }
+
+      - platform: number
+        name: "Pressure Min Threshold"
+        key: pressure_min_threshold
+        threshold: { of: pressure, end: min }
+        icon: mdi:gauge-low
+        device_class: atmospheric_pressure
+        entity_category: config
+        unit: "hPa"
+        attributes:
+          value:
+            param: "pressure_min_threshold"
+            type: esp.param.config.pressure_min_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 900.0, max: 1000.0, step: 1.0 }
+
+      - platform: number
+        name: "Pressure Max Threshold"
+        key: pressure_max_threshold
+        threshold: { of: pressure, end: max }
+        icon: mdi:gauge-full
+        device_class: atmospheric_pressure
+        entity_category: config
+        unit: "hPa"
+        attributes:
+          value:
+            param: "pressure_max_threshold"
+            type: esp.param.config.pressure_max_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 1000.0, max: 1100.0, step: 1.0 }
+
+      - platform: number
+        name: "CO2 Min Threshold"
+        key: co2_min_threshold
+        threshold: { of: co2, end: min }
+        icon: mdi:molecule-co2
+        entity_category: config
+        unit: "ppm"
+        attributes:
+          value:
+            param: "co2_min_threshold"
+            type: esp.param.config.co2_min_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 300.0, max: 800.0, step: 25.0 }
+
+      - platform: number
+        name: "CO2 Max Threshold"
+        key: co2_max_threshold
+        threshold: { of: co2, end: max }
+        icon: mdi:molecule-co2
+        entity_category: config
+        unit: "ppm"
+        attributes:
+          value:
+            param: "co2_max_threshold"
+            type: esp.param.config.co2_max_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 600.0, max: 3000.0, step: 50.0 }
+
+      - platform: number
+        name: "VOC Min Threshold"
+        key: voc_min_threshold
+        threshold: { of: voc, end: min }
+        icon: mdi:air-filter
+        entity_category: config
+        unit: "μg/m³"
+        attributes:
+          value:
+            param: "voc_min_threshold"
+            type: esp.param.config.voc_min_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 0.0, max: 200.0, step: 10.0 }
+
+      - platform: number
+        name: "VOC Max Threshold"
+        key: voc_max_threshold
+        threshold: { of: voc, end: max }
+        icon: mdi:alert-circle
+        entity_category: config
+        unit: "μg/m³"
+        attributes:
+          value:
+            param: "voc_max_threshold"
+            type: esp.param.config.voc_max_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 100.0, max: 1000.0, step: 25.0 }
+
+      - platform: number
+        name: "PM2.5 Min Threshold"
+        key: pm25_min_threshold
+        threshold: { of: pm25, end: min }
+        icon: mdi:blur-linear
+        entity_category: config
+        unit: "μg/m³"
+        attributes:
+          value:
+            param: "pm25_min_threshold"
+            type: esp.param.config.pm25_min_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 0.0, max: 50.0, step: 1.0 }
+
+      - platform: number
+        name: "PM2.5 Max Threshold"
+        key: pm25_max_threshold
+        threshold: { of: pm25, end: max }
+        icon: mdi:blur
+        entity_category: config
+        unit: "μg/m³"
+        attributes:
+          value:
+            param: "pm25_max_threshold"
+            type: esp.param.config.pm25_max_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 25.0, max: 300.0, step: 5.0 }
+
+      # These bounds reproduce the example firmware's supported interval rather
+      # than applying a generic sampling range.
+      - platform: number
+        name: "Update Interval"
+        key: update_interval
+        device_class: duration
+        entity_category: config
+        unit: "s"
+        attributes:
+          value:
+            param: "update_interval"
+            type: esp.param.config.update_interval
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 10, max: 300, step: 10 }
+
+      # This boolean setting is a switch rather than a number. The difference
+      # between the parameter name threshold_alarm_enabled and its type ending
+      # in threshold_alarm_enable is intentional in the example firmware.
+      - platform: switch
+        name: "Threshold Alarm"
+        key: threshold_alarm_enabled
+        entity_category: config
+        attributes:
+          state:
+            param: "threshold_alarm_enabled"
+            type: esp.param.config.threshold_alarm_enable
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]

@@ -1,0 +1,44 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: fan
+product_label: "Fan"
+product_labels:
+  zh-Hans: "风扇"
+model: "*"
+
+devices:
+  # The RainMaker fan helper provides only Name and Power. Speed and Direction
+  # remain optional because applications add them only for capable models.
+  - type: esp.device.fan
+    entities:
+      - platform: fan
+        name: "Fan"
+        key: fan
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+          percentage:
+            param: "Speed"
+            type: esp.param.speed
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            optional: true
+            bounds: { min: 0, max: 5, step: 1 }
+            scale: { to: [0, 100] }
+          direction:
+            param: "Direction"
+            type: esp.param.direction
+            data_type: int
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+            bounds: { min: 0, max: 1, step: 1 }
+            map: { 0: forward, 1: reverse }

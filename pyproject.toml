@@ -1,6 +1,8 @@
 # =============================================================================
 # ESP-Weaver pyproject.toml
-# Aligned with Home Assistant Core standards for future Core submission
+# The lint, type and test settings follow Home Assistant Core's, so the code is
+# held to the same bar the core integrations are. This is a custom integration
+# distributed through HACS; nothing here is a step toward a Core submission.
 # Reference: https://github.com/home-assistant/core/blob/dev/pyproject.toml
 # =============================================================================
 
@@ -10,8 +12,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "esp_weaver"
-version = "0.0.1"
-description = "ESP Local Control integration for Home Assistant"
+version = "0.0.2"
+description = "Home Assistant integration for ESP devices over local control"
 requires-python = ">=3.13.2"
 license = {text = "Apache-2.0"}
 authors = [
@@ -24,15 +26,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
-    "pytest-cov>=4.1.0",
-    "pytest-homeassistant-custom-component>=0.13.301",
-    "ruff>=0.13.0",
-    "mypy>=1.10.0",
-]
+# Test and lint dependencies live in requirements_test.txt (single list).
 
 # =============================================================================
 # Pytest Configuration (aligned with HA Core)
@@ -61,8 +55,11 @@ markers = [
 [tool.coverage.run]
 source = ["custom_components/esp_weaver"]
 omit = [
-    # Third-party: ESP Local Control protocol implementation
-    # NOTE: For HA Core submission, extract to separate PyPI package
+    # ESP Local Control protocol implementation, derived from Espressif's
+    # esp_local_ctrl / esp-idf-provisioning tools and kept in their style.
+    # Exercised through the client and transport tests, not measured on its
+    # own. What that leaves open: the sec_patch_ver 0 nonce handling in
+    # Security2 and the two-stream Security1 path have no test of their own.
     "custom_components/esp_weaver/iot/local_ctrl/*",
 ]
 
@@ -250,7 +247,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# ----- Third-party code (to be extracted for HA Core submission) -----
+# ----- Protocol code kept in the style of the Espressif tools it derives from -----
 "custom_components/esp_weaver/iot/local_ctrl/**/*.py" = ["ALL"]
 
 # ----- Aligned with HA Core patterns -----
@@ -269,6 +266,16 @@ ignore = [
     "SLF001",   # private member access
     "PLR0915",  # too many statements
     "TID251",   # relative imports from conftest allowed in tests
+]
+
+# Developer CLI scripts: stdout is the interface, and the repo root has to be
+# put on sys.path before the component can be imported.
+"tools/**/*.py" = [
+    "I001",     # imports follow the sys.path setup, so they cannot be sorted up
+    "INP001",   # standalone scripts, not a package
+    "PLC0415",  # local imports keep optional deps out of module import
+    "SLF001",   # scripts reach into internals deliberately
+    "T201",     # print is the output channel
 ]
 
 [tool.ruff.lint.flake8-import-conventions.extend-aliases]
@@ -319,6 +326,18 @@ ignore-paths = ["custom_components/esp_weaver/iot/local_ctrl"]
 [tool.pylint.format]
 max-line-length = 88
 
+[tool.pylint.classes]
+# Entities take their shape in _configure, and the config flow's shared
+# profile-choice steps in _init_profile_choice; __init__ calls both, so an
+# attribute first set there is not set "outside __init__".
+defining-attr-methods = [
+    "__init__",
+    "__new__",
+    "__post_init__",
+    "_configure",
+    "_init_profile_choice",
+]
+
 [tool.pylint.messages_control]
 # Disable rules that conflict with HA patterns or have known pylint limitations
 disable = [
@@ -338,6 +357,15 @@ disable = [
     "import-outside-toplevel",   # HA delayed imports for circular dependency avoidance
     # Pylint limitations
     "unnecessary-ellipsis",      # Protocol definitions need ...
+    # The config flow mixins call async_create_entry(options=...) on whatever
+    # flow class mixes them in; pylint resolves it to FlowHandler's, which has
+    # no `options`. The real call is ConfigFlow's, and mypy checks it there.
+    "unexpected-keyword-arg",
+    # Checked by ruff, as Home Assistant Core configures pylint too
+    "line-too-long",             # E501
+    "unused-argument",           # ARG001; HA callback signatures are fixed
+    "try-except-raise",          # TRY302
+    "consider-using-f-string",   # UP031/UP032
 ]
 
 # =============================================================================
@@ -369,9 +397,8 @@ disallow_untyped_defs = true
 warn_return_any = true
 warn_unreachable = true
 
-# Third-party code exclusions (to be extracted for HA Core submission)
-# NOTE: local_ctrl is ESP Provisioning library - will be extracted to separate
-# PyPI package for HA Core submission
+# The protocol code is not typed to this standard; its interface to the rest
+# of the package is the client and transport modules, which are.
 exclude = [
     "custom_components/esp_weaver/iot/local_ctrl/",
     ".venv/",
@@ -380,9 +407,8 @@ exclude = [
 explicit_package_bases = true
 mypy_path = "."
 
-# Third-party code: ESP Local Control protocol (to be extracted for HA Core submission)
-# NOTE: local_ctrl is a third-party protocol library that will be extracted to a
-# separate PyPI package for HA Core submission
+# ESP Local Control protocol code, derived from Espressif's provisioning
+# tools; not held to the package's typing standard (see exclude above).
 [[tool.mypy.overrides]]
 module = [
     "custom_components.esp_weaver.iot.local_ctrl.*",

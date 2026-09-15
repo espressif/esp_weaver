@@ -7,7 +7,7 @@ This module provides helper functions for converting between
 bytes, integers, and strings.
 """
 
-__all__ = ["bytes_to_long", "hex_str_to_bytes", "long_to_bytes", "str_to_bytes"]
+__all__ = ["bytes_to_long", "long_to_bytes", "str_to_bytes"]
 
 
 def bytes_to_long(s: bytes) -> int:
@@ -48,17 +48,3 @@ def str_to_bytes(s: str) -> bytes:
         Bytes representation.
     """
     return bytes(s, encoding="latin-1")
-
-
-def hex_str_to_bytes(s: str) -> bytes:
-    """Convert hex string to bytes.
-
-    Example: 'deadbeef' -> b'\\xde\\xad\\xbe\\xef'
-
-    Args:
-        s: Hex string to convert.
-
-    Returns:
-        Bytes representation.
-    """
-    return bytes.fromhex(s)

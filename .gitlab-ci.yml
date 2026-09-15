@@ -1,7 +1,5 @@
 ---
-# GitLab CI/CD Configuration for esp_weaver
-# Home Assistant Custom Integration - Official Standards Compliant
-# Reference: https://github.com/home-assistant/core/.pre-commit-config.yaml
+# GitLab CI for esp_weaver; mirrors .github/workflows/ci.yml where possible.
 
 stages:
   - validate
@@ -17,12 +15,11 @@ cache:
   key: "python-deps-v4"
   paths:
     - .cache/pip
-  # 注意：移除了 .venv/ 缓存（84000+ 文件太大，导致上传失败）
-  # pip 会从 .cache/pip 中的 wheel 快速安装，无需缓存整个虚拟环境
+  # Do not cache .venv/ (too large for GitLab artifact upload). pip wheels in
+  # .cache/pip are enough.
 
-# =============================================================================
-# Base Template (Shell Executor)
-# =============================================================================
+# The runner tagged `shell` is a Docker executor whose default image is
+# espressif/idf (Python 3.12), so every job names the image it needs.
 
 .python-base:
   image: python:3.13.2
@@ -37,17 +34,13 @@ cache:
     - pip install --upgrade pip wheel setuptools
     # Use legacy resolver if backtracking resolver hits resolution-too-deep
     - pip install -r requirements_test.txt || pip install --use-deprecated=legacy-resolver -r requirements_test.txt
-    # Install esp-rainmaker-cli without deps to avoid cryptography version conflict
-    # (esp-secure-cert-tool>=2.0.0 is already installed from requirements_test.txt)
-    - pip install esp-rainmaker-cli --no-deps -q
-
-# =============================================================================
-# Stage: Validate
-# =============================================================================
 
 hacs-validate:
   extends: .python-base
   stage: validate
+  # Not the HACS action: that one reads the GitHub repository (description,
+  # topics, issues) and runs in the GitHub workflow. This only checks the
+  # files HACS needs to find in the tree.
   script:
     - |
       python3 <<'PY'
@@ -92,130 +85,75 @@ hacs-validate:
       PY
 
 hassfest-validate:
-  extends: .python-base
   stage: validate
+  tags:
+    - shell
+  # The image home-assistant/actions/hassfest runs on GitHub: Home Assistant
+  # core's script.hassfest over every integration under custom_components/.
+  # Its entrypoint looks for the manifests in the working directory, so it
+  # must not run when the container starts (the checkout is not there yet);
+  # the script calls it once the runner has entered the checkout.
+  image:
+    name: ghcr.io/home-assistant/hassfest
+    entrypoint: [""]
   script:
-    - |
-      python3 <<'PY'
-      import json
-      import sys
-      from pathlib import Path
-
-      errors = []
-      try:
-          with open('custom_components/esp_weaver/manifest.json') as f:
-              manifest = json.load(f)
-      except FileNotFoundError:
-          errors.append('manifest.json missing')
-          print('❌ Hassfest validation FAILED:')
-          for e in errors: print(f'  - {e}')
-          sys.exit(1)
-      except json.JSONDecodeError as e:
-          errors.append(f'manifest.json invalid JSON: {e}')
-          print('❌ Hassfest validation FAILED:')
-          for e in errors: print(f'  - {e}')
-          sys.exit(1)
-
-      # Required fields
-      required = {
-          'domain': str, 'name': str, 'version': str,
-          'documentation': str, 'codeowners': list,
-          'config_flow': bool, 'iot_class': str, 'integration_type': str,
-      }
-      for field, ftype in required.items():
-          if field not in manifest:
-              errors.append(f'Missing: {field}')
-          elif not isinstance(manifest[field], ftype):
-              errors.append(f'{field} must be {ftype.__name__}')
-
-      # Validate values
-      if not manifest.get('documentation', '').startswith('https://'):
-          errors.append('documentation must be HTTPS URL')
-
-      for owner in manifest.get('codeowners', []):
-          if not owner.startswith('@'):
-              errors.append(f'codeowner must start with @: {owner}')
-
-      valid_iot = ['cloud_polling', 'cloud_push', 'local_polling',
-                   'local_push', 'calculated', 'assumed_state', 'unknown']
-      if manifest.get('iot_class') not in valid_iot:
-          errors.append(f"Invalid iot_class: {manifest.get('iot_class')}")
-
-      valid_types = ['device', 'hub', 'service', 'system', 'helper']
-      if manifest.get('integration_type') not in valid_types:
-          errors.append(f'Invalid integration_type')
-
-      # Check files
-      for f in ['__init__.py', 'config_flow.py', 'const.py', 'strings.json']:
-          if not Path(f'custom_components/esp_weaver/{f}').exists():
-              errors.append(f'Missing: {f}')
-
-      if errors:
-          print('❌ Hassfest validation FAILED:')
-          for e in errors: print(f'  - {e}')
-          sys.exit(1)
-      print('✅ Hassfest validation passed')
-      PY
-
-# =============================================================================
-# Stage: Lint (Official HA Standards)
-# =============================================================================
+    - /usr/src/homeassistant/script/hassfest/docker/entrypoint.sh
 
 ruff-lint:
   extends: .python-base
   stage: lint
   script:
-    # Ruff installed via requirements_test.txt (pinned version)
     - ruff check custom_components/esp_weaver tests
 
 ruff-format:
   extends: .python-base
   stage: lint
   script:
-    # Ruff installed via requirements_test.txt (pinned version)
     - ruff format --check custom_components/esp_weaver tests
 
-# ⭐ MANDATORY: Codespell (Home Assistant requirement)
 codespell:
   extends: .python-base
   stage: lint
   script:
-    - pip install codespell==2.3.0
-    - |
-      codespell custom_components tests *.md \
-        --ignore-words-list=hass,caf \
-        --skip="*.json,*.ambr,*.pyc,htmlcov/*,__pycache__/*,*.egg-info/*" \
-        --quiet-level=2
-  allow_failure: false  # ← Must pass!
+    # Configured by .codespellrc; scans the whole checkout.
+    - codespell
+  allow_failure: false
 
 yamllint:
   extends: .python-base
   stage: lint
   script:
-    - pip install yamllint==1.35.1
-    - yamllint .gitlab-ci.yml custom_components/esp_weaver/quality_scale.yaml
-  allow_failure: true  # Optional: relaxed for development
+    - |
+      yamllint .gitlab-ci.yml .github \
+        custom_components/esp_weaver/quality_scale.yaml \
+        custom_components/esp_weaver/device_profiles
+  allow_failure: false
+
+profiles:
+  extends: .python-base
+  stage: lint
+  script:
+    # No device type may declare the same entity key twice. The shipped
+    # Espressif profiles and the profile code copies are not compared with
+    # esp-weaver-profiles in CI - the repositories merge independently;
+    # maintainers run the two check tools by hand against a local checkout.
+    - python tools/check_profile_keys.py
+  allow_failure: false
 
 mypy:
   extends: .python-base
   stage: lint
   script:
-    # Mypy installed via requirements_test.txt (pinned version)
-    # Excludes local_ctrl/ (third-party ESP-IDF code) via pyproject.toml config
-    - mypy custom_components/esp_weaver --config-file=pyproject.toml
-  allow_failure: false  # Type checking should pass
+    # Mypy uses pyproject.toml; custom_components/esp_weaver/iot/local_ctrl is excluded.
+    - mypy custom_components/esp_weaver tests --config-file=pyproject.toml
+  allow_failure: false
 
 pylint:
   extends: .python-base
   stage: lint
   script:
-    - pip install pylint==3.3.2
-    - pylint custom_components/esp_weaver --ignore=local_ctrl --max-line-length=88
-  allow_failure: false  # Pylint must pass
-
-# =============================================================================
-# Stage: Test
-# =============================================================================
+    - pylint custom_components/esp_weaver --rcfile=pyproject.toml
+  allow_failure: false
 
 pytest:
   extends: .python-base
@@ -245,7 +183,23 @@ pytest:
         path: coverage.xml
     expire_in: 30 days
 
-# ⭐ MANDATORY: Config Flow 100% Coverage
+# hacs.json declares 2025.12.5; pins pytest-homeassistant-custom-component 0.13.301
+# (2025.12.4), the last plugin on the 2025.12 line—2025.12.5 had no matching plugin.
+pytest-minimum:
+  extends: .python-base
+  stage: test
+  before_script:
+    - python3 -m venv .venv
+    - source .venv/bin/activate
+    - pip install --upgrade pip wheel setuptools
+    - |
+      sed -E 's/^pytest-homeassistant-custom-component==.*/pytest-homeassistant-custom-component==0.13.301/' \
+        requirements_test.txt > requirements_test_minimum.txt
+    - pip install -r requirements_test_minimum.txt
+    - python -c "import homeassistant.const as c; print('Home Assistant', c.__version__)"
+  script:
+    - pytest tests/ -q
+
 pytest-config-flow:
   extends: .python-base
   stage: test
@@ -256,6 +210,7 @@ pytest-config-flow:
       if [ "$COLLECTED" -gt 0 ]; then
         pytest tests/ -k config_flow \
           --cov=custom_components.esp_weaver.config_flow \
+          --cov=custom_components.esp_weaver.flows \
           --cov-report=term-missing \
           --cov-fail-under=100 \
           -v
@@ -264,49 +219,29 @@ pytest-config-flow:
         echo "$COLLECT_OUTPUT"
         exit 1
       fi
-  allow_failure: false  # ← Must pass!
+  allow_failure: false
 
-# =============================================================================
-# Quality Gate (Home Assistant Platinum Standard)
-# =============================================================================
-# This job waits for all checks to complete. Jobs with allow_failure: true
-# will not block the gate if they fail, but we still wait for them to finish.
-#
-# Required (must pass):
-#   - hacs-validate, hassfest-validate
-#   - ruff-lint, ruff-format, codespell, mypy
-#   - pytest (95% coverage), pytest-config-flow (100% coverage)
-#
-# Optional (won't block):
-#   - yamllint, pylint
-
+# Aggregates success of all jobs listed in needs.
 quality-gate:
   stage: test
   tags:
     - shell
   needs:
-    # ===== MANDATORY: Must pass =====
     - hacs-validate
     - hassfest-validate
     - ruff-lint
     - ruff-format
     - codespell
+    - yamllint
     - mypy
+    - pylint
+    - profiles
     - pytest
+    - pytest-minimum
     - pytest-config-flow
-    # ===== OPTIONAL: Won't block if failed =====
-    - job: yamllint
-      optional: true
-    - job: pylint
-      optional: true
   script:
-    - echo "✅ All mandatory quality checks passed!"
-    - echo "📊 Code coverage meets 95% threshold"
-    - echo "🏆 Ready for Home Assistant Platinum submission"
-
-# =============================================================================
-# Stage: Deploy (Push to GitHub)
-# =============================================================================
+    - echo "All mandatory quality checks passed"
+    - echo "Code coverage meets the 95% threshold"
 
 push_to_github:
   stage: deploy

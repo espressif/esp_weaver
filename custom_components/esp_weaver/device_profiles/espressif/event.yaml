@@ -1,0 +1,33 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: event
+product_label: "Event"
+product_labels:
+  zh-Hans: "事件"
+model: "*"
+
+devices:
+  - type: esp.device.event
+    entities:
+      - platform: event
+        name: "Event"
+        key: event
+        device_class: button
+        attributes:
+          # Home Assistant fixes the allowed event types when it creates the
+          # entity, so firmware with other event names needs a custom profile.
+          # RainMaker has no dedicated event channel; an event fires when this
+          # parameter changes. Firmware should report the event name and then an
+          # empty string so repeated identical events remain detectable. The
+          # initial value establishes a baseline, and an omitted parameter does
+          # not clear the previous value.
+          event_type:
+            param: "Event"
+            type: esp.param.mode
+            data_type: string
+            ui_type: esp.ui.text
+            properties: [read]
+            options: [single_press, double_press, triple_press, long_press, long_release]

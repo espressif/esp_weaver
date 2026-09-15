@@ -7,10 +7,15 @@
 # homeassistant, pytest, pytest-asyncio, pytest-cov, freezegun,
 # aiohttp, syrupy, and many other test utilities
 # ============================================================
-# pytest-homeassistant-custom-component pins homeassistant version
-# This package auto-updates daily to match the latest HA version
-# 0.13.301 corresponds to HA 2025.12.4
-pytest-homeassistant-custom-component>=0.13.301
+# pytest-homeassistant-custom-component pins the homeassistant version it
+# tests against, and a new release follows every Home Assistant release. It is
+# pinned here so that a Home Assistant release does not change what CI tests
+# overnight; bumping it is a deliberate change, made with the test run that
+# proves the new version. 0.13.316 is Home Assistant 2026.2.3, the last
+# release for Python 3.13. CI also runs the suite against the oldest release
+# the integration supports (hacs.json), installing the plugin version for it
+# in place of this one; see the "minimum" job in the CI files.
+pytest-homeassistant-custom-component==0.13.316
 
 # ============================================================
 # ESP-Weaver specific dependencies (NOT in pytest-homeassistant-custom-component)
@@ -19,16 +24,12 @@ pytest-homeassistant-custom-component>=0.13.301
 # Note: Must match the version used to generate *_pb2.py files
 protobuf>=6.31.0
 
-# RainMaker cloud support (compatible with HA's cryptography>=46.0.2)
-# Note: esp-secure-cert-tool>=2.0.0 doesn't pin cryptography version
-esp-secure-cert-tool>=2.0.0
+# Cloud control is not supported in this release; the tests mock the
+# esp-rainmaker-cli subprocess, so neither the CLI nor its extras are needed.
 
-# NOTE: esp-rainmaker-cli installation:
-# - The integration auto-installs esp-rainmaker-cli with --no-deps on first use
-# - This avoids the cryptography version conflict from esp-secure-cert-tool==1.0.1
-# - For CI/testing, we install it explicitly below (after requirements_test.txt)
-# - Tests mock subprocess.run and _ensure_cli_available(), no real CLI needed
-
-# Linting tools
+# Linting tools (the only place these versions are pinned; CI installs this file)
 ruff==0.14.11
 mypy==1.19.1
+pylint==4.0.8
+codespell==2.3.0
+yamllint==1.35.1

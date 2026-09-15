@@ -1,0 +1,288 @@
+# RainMaker standard services -> Home Assistant entities (shared service layer)
+# =============================================================================
+# This file is not a product. It is the default mapping of the 10
+# esp.service.* every RainMaker firmware shares. Whichever product profile the
+# user picks for a device, this layer is loaded as the baseline for services;
+# where a product profile declares the same service type itself, the product
+# profile wins.
+# The authority for each service and the parameter-name conflicts resolved are
+# in vendors/espressif/CONVENTIONS.md of the esp-weaver-profiles repository.
+# =============================================================================
+
+version: 1
+
+services:
+  # ---------------------------------------------------------------------------
+  # Time  ESP_RMAKER_SERVICE_TIME
+  # ---------------------------------------------------------------------------
+  - type: esp.service.time
+    entities:
+      - platform: text
+        name: "Timezone"
+        key: timezone
+        entity_category: config
+        attributes:
+          value:
+            param: "TZ"
+            type: esp.param.tz
+            data_type: string
+            properties: [read, write]
+      - platform: text
+        name: "Timezone (POSIX)"
+        key: timezone_posix
+        entity_category: config
+        attributes:
+          value:
+            param: "TZ-POSIX"
+            type: esp.param.tz_posix
+            data_type: string
+            properties: [read, write]
+      # Present only when the firmware enables CONFIG_ESP_RMAKER_TIME_CURRENT_TIME_PARAM.
+      # No entity: although marked read, the firmware uses this parameter only
+      # as input—esp_rmaker_time_add_service() creates it with a fixed
+      # initial value of 0, the callback calls settimeofday() on a received
+      # value, and nothing ever writes the current time back into it (see
+      # esp_rmaker_time_service.c). Reading it is therefore always 0, and a
+      # sensor would only hang a constant 0 in HA. Setting the clock of an
+      # offline device is an operations action with no HA entity domain; use a
+      # service call to write the parameter directly when needed.
+      - platform: none
+        name: "Device Time"
+        key: device_time
+        attributes:
+          value:
+            param: "Timestamp"
+            type: esp.param.timestamp
+            data_type: int
+            properties: [read, write]
+
+  # ---------------------------------------------------------------------------
+  # System  ESP_RMAKER_SERVICE_SYSTEM
+  # ---------------------------------------------------------------------------
+  - type: esp.service.system
+    entities:
+      - platform: button
+        name: "Reboot"
+        key: reboot
+        device_class: restart
+        entity_category: config
+        attributes:
+          press:
+            param: "Reboot"
+            type: esp.param.reboot
+            data_type: bool
+            properties: [read, write]
+      # Deliberately no device_class: HA button has only identify / restart /
+      # update. A factory reset wipes all configuration and is not a restart;
+      # marking it restart would make the UI and voice assistants treat it as
+      # an ordinary reboot button, with the risk of wiping the device by
+      # accident.
+      - platform: button
+        name: "Factory Reset"
+        key: factory_reset
+        entity_category: config
+        attributes:
+          press:
+            param: "Factory-Reset"
+            type: esp.param.factory-reset
+            data_type: bool
+            properties: [read, write]
+      # Deliberately no device_class: as above, clearing Wi-Fi credentials is
+      # not a restart (the device drops off the network and needs provisioning).
+      - platform: button
+        name: "Wi-Fi Reset"
+        key: wifi_reset
+        entity_category: config
+        attributes:
+          press:
+            param: "Wi-Fi-Reset"
+            type: esp.param.wifi-reset
+            data_type: bool
+            properties: [read, write]
+
+  # ---------------------------------------------------------------------------
+  # OTA  ESP_RMAKER_SERVICE_OTA
+  #   Default RainMaker params Status / Info / URL (ESP_RMAKER_DEF_OTA_*_NAME).
+  #   No HA entities—updates via RainMaker/cloud; fw_version still on device info.
+  # ---------------------------------------------------------------------------
+  - type: esp.service.ota
+    entities:
+      - platform: none
+        name: "OTA Status"
+        key: ota_status
+        attributes:
+          value:
+            param: "Status"
+            type: esp.param.ota_status
+            data_type: string
+            properties: [read]
+      - platform: none
+        name: "OTA URL"
+        key: ota_url
+        attributes:
+          value:
+            param: "URL"
+            type: esp.param.ota_url
+            data_type: string
+            properties: [write]
+      - platform: none
+        name: "OTA Info"
+        key: ota_info
+        attributes:
+          value:
+            param: "Info"
+            type: esp.param.ota_info
+            data_type: string
+            properties: [read]
+
+  # ---------------------------------------------------------------------------
+  # Schedule  ESP_RMAKER_SERVICE_SCHEDULE
+  #   An array managed by the RainMaker app / cloud; HA uses automations
+  #   instead, so no entity.
+  # ---------------------------------------------------------------------------
+  - type: esp.service.schedule
+    entities:
+      - platform: none
+        name: "Schedules"
+        key: schedules
+        attributes:
+          value:
+            param: "Schedules"
+            type: esp.param.schedules
+            data_type: array
+            properties: [read, write]
+
+  # ---------------------------------------------------------------------------
+  # Scenes  ESP_RMAKER_SERVICE_SCENES
+  #   An array managed by the RainMaker app / cloud, like Schedules; HA has
+  #   its own scenes, so no entity.
+  # ---------------------------------------------------------------------------
+  - type: esp.service.scenes
+    entities:
+      - platform: none
+        name: "Scenes"
+        key: scenes
+        attributes:
+          value:
+            param: "Scenes"
+            type: esp.param.scenes
+            data_type: array
+            properties: [read, write]
+
+  # ---------------------------------------------------------------------------
+  # Local control  ESP_RMAKER_SERVICE_LOCAL_CONTROL
+  #   Local discovery / provisioning credentials; internal service, no HA entity.
+  # ---------------------------------------------------------------------------
+  - type: esp.service.local_control
+    entities:
+      - platform: none
+        name: "Local Control"
+        key: local_control
+        attributes:
+          value:
+            param: "POP"
+            type: esp.param.local_control_pop
+            data_type: string
+            properties: [read]
+      - platform: none
+        name: "Local Control Type"
+        key: local_control_type
+        attributes:
+          value:
+            param: "Type"
+            type: esp.param.local_control_type
+            data_type: int
+            properties: [read]
+
+  # ---------------------------------------------------------------------------
+  # User authentication  ESP_RMAKER_SERVICE_USER_AUTH
+  #   The user-device association flow; internal service, no HA entity.
+  # ---------------------------------------------------------------------------
+  - type: esp.service.rmaker-user-auth
+    entities:
+      - platform: none
+        name: "User Token"
+        key: user_token
+        attributes:
+          value:
+            param: "UserToken"
+            type: esp.param.user-token
+            data_type: string
+            properties: [write]
+      - platform: none
+        name: "Base URL"
+        key: base_url
+        attributes:
+          value:
+            param: "BaseURL"
+            type: esp.param.base-url
+            data_type: string
+            properties: [read, write]
+      - platform: none
+        name: "User Token Status"
+        key: user_token_status
+        attributes:
+          value:
+            param: "UserTokenStatus"
+            type: esp.param.user-token-status
+            data_type: int
+            properties: [read]
+
+  # ---------------------------------------------------------------------------
+  # Groups  ESP_RMAKER_SERVICE_GROUPS
+  #   Node group identifier; internal service, no HA entity.
+  # ---------------------------------------------------------------------------
+  - type: esp.service.groups
+    entities:
+      - platform: none
+        name: "Group ID"
+        key: group_id
+        attributes:
+          value:
+            param: "GroupID"
+            type: esp.param.group-id
+            data_type: string
+            properties: [read, write]
+
+  # ---------------------------------------------------------------------------
+  # RainMaker controller  ESP_RMAKER_SERVICE_RM_CONTROLLER
+  #   When the node acts as a controller it subscribes to the group topic by
+  #   GroupID; internal service, no HA entity.
+  #   Uses the same parameter type as esp.service.groups; each of the two
+  #   services holds its own copy.
+  # ---------------------------------------------------------------------------
+  - type: esp.service.rmaker-controller
+    entities:
+      - platform: none
+        name: "Group ID"
+        key: group_id
+        attributes:
+          value:
+            param: "GroupID"
+            type: esp.param.group-id
+            data_type: string
+            properties: [read, write]
+
+  # ---------------------------------------------------------------------------
+  # Connectivity  ESP_RMAKER_SERVICE_CONNECTIVITY
+  #   Maintained by the MQTT LWT; the cloud sets it false when the device goes offline.
+  # ---------------------------------------------------------------------------
+  - type: esp.service.connectivity
+    entities:
+      - platform: binary_sensor
+        name: "Connectivity"
+        key: connectivity
+        device_class: connectivity
+        entity_category: diagnostic
+        attributes:
+          state:
+            param: "Connected"
+            type: esp.param.connected
+            data_type: bool
+            properties: [read]
+
+
+# Reconciliation with esp_rmaker_standard_types.h and extended product profiles:
+# device types live under device_profiles/espressif/; this file maps all ten
+# ESP_RMAKER_SERVICE_* types. Full macro and documentation cross-check:
+# esp-weaver-profiles vendors/espressif/CONVENTIONS.md.

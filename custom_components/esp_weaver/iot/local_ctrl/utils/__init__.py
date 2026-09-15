@@ -6,6 +6,6 @@ This module provides convenience functions for common data type
 conversions used in the local control protocol.
 """
 
-from .convenience import bytes_to_long, hex_str_to_bytes, long_to_bytes, str_to_bytes
+from .convenience import bytes_to_long, long_to_bytes, str_to_bytes
 
-__all__ = ["bytes_to_long", "hex_str_to_bytes", "long_to_bytes", "str_to_bytes"]
+__all__ = ["bytes_to_long", "long_to_bytes", "str_to_bytes"]

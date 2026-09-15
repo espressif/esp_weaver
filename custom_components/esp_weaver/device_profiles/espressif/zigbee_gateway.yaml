@@ -1,0 +1,29 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: zigbee_gateway
+product_label: "Zigbee gateway"
+product_labels:
+  zh-Hans: "Zigbee 网关"
+model: "*"
+
+devices:
+  # The Add_zigbee_device parameter becomes a configuration switch. Firmware
+  # configured for install codes may instead report a string with a QR scanner;
+  # that incompatible shape prevents creation of this switch entity.
+  - type: esp.device.zigbee_gateway
+    entities:
+      - platform: switch
+        name: "Add Zigbee Device"
+        key: add_zigbee_device
+        device_class: switch
+        entity_category: config
+        attributes:
+          state:
+            param: "Add_zigbee_device"
+            type: esp.param.add_zigbee_device
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]

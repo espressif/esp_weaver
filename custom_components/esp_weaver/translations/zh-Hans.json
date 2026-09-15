@@ -1,126 +1,321 @@
 {
+  "common": {
+    "problem_conflict": "{param} 的 {field} 不一致（产品：{declared}；设备：{reported}）",
+    "problem_not_reported": "设备未提供以下信息：{params}",
+    "profile_imported": "已导入 {filename}，可在产品列表中选择。",
+    "device_online": "在线",
+    "device_offline": "离线",
+    "devices_matched": "已找到 {count} 台与 **{product}** 匹配的设备。",
+    "other_devices": "已找到 {silent} 台 Other device（未提供型号信息）。",
+    "repository_offline": "若列表中未显示您要找的厂商，请确认 Home Assistant 网络连接正常后重试。",
+    "repository_following": "当前从 pull request {source} 读取配置文件（提交 {commit}），而不是已发布的仓库。如需恢复，请在添加设备的第一步清空 pull request 字段。",
+    "repository_following_unread": "已设置从 pull request {source} 读取配置文件，但尚未读取成功。如需恢复，请在添加设备的第一步清空 pull request 字段。",
+    "source_builtin": "内置",
+    "source_local": "自定义文件",
+    "source_cached": "已保存",
+    "source_repo": "在线",
+    "source_repo_following": "pull request {source}",
+    "mismatch_model": "设备型号缺失，或与所选产品不一致。",
+    "threshold_high_title": "{device}：{sensor} 过高",
+    "threshold_high_message": "{sensor} 当前为 {value}{unit}，高于你设置的上限 {threshold}{unit}。",
+    "threshold_low_title": "{device}：{sensor} 过低",
+    "threshold_low_message": "{sensor} 当前为 {value}{unit}，低于你设置的下限 {threshold}{unit}。"
+  },
   "exceptions": {
+    "profile_unbound": {
+      "message": "{device} 缺少产品信息。请删除该设备，然后重新添加并选择正确的产品。"
+    },
+    "profile_missing": {
+      "message": "{device} 保存的产品信息已不可用。请删除该设备，然后重新添加并选择正确的产品。"
+    },
     "min_threshold_too_high": {
       "message": "最小阈值 ({value}) 必须小于最大阈值 ({max_value})。"
     },
     "max_threshold_too_low": {
       "message": "最大阈值 ({value}) 必须大于最小阈值 ({min_value})。"
+    },
+    "import_bad_filename": {
+      "message": "`{filename}` 不是有效的 profile 文件名。文件名必须以 .yaml 或 .yml 结尾，且不能包含目录路径。"
+    },
+    "import_download_failed": {
+      "message": "无法从 {url} 下载 profile：{error}"
+    },
+    "import_too_large": {
+      "message": "{url} 指向的文件大小超过 profile 的 {limit} KB 限制。请确认链接直接指向 profile 文件。"
+    },
+    "import_not_text": {
+      "message": "{url} 的文件不是 UTF-8 文本。如果这是 GitHub 文件页面，请使用 raw 链接。"
+    },
+    "import_invalid": {
+      "message": "下载的 profile `{filename}` 校验失败，因此未保存：{detail}"
+    },
+    "import_exists": {
+      "message": "`{filename}` 已存在。如需替换，请在调用该动作时启用覆盖选项。"
+    },
+    "import_write_failed": {
+      "message": "无法将 `{filename}` 写入 profile 目录：{error}"
+    },
+    "reload_filename_without_url": {
+      "message": "请输入要下载的 profile 网址；如果只需重新加载现有 profile，请将网址和文件名都留空。"
+    },
+    "upload_too_large": {
+      "message": "`{filename}` 的大小超过 profile 的 {limit} KB 限制。请确认选择了正确的文件。"
+    },
+    "upload_not_text": {
+      "message": "上传的文件不是 UTF-8 文本。请另存为 UTF-8 后重新选择。"
+    },
+    "upload_expired": {
+      "message": "该上传已失效，请重新选择文件。"
+    },
+    "upload_unreadable": {
+      "message": "无法读取上传的文件：{error}"
+    },
+    "write_not_supported": {
+      "message": "无法控制 {entity}，因为设备没有提供对应的可更改设置。"
+    },
+    "write_refused": {
+      "message": "设备拒绝更改 {entity}。"
+    },
+    "write_failed": {
+      "message": "无法连接设备以更改 {entity}。"
+    },
+    "cannot_turn_off": {
+      "message": "{entity} 无法在此设备上关闭。"
+    },
+    "no_mode_to_set": {
+      "message": "{entity} 在此设备上没有可设置的模式。"
+    },
+    "no_operation_to_set": {
+      "message": "{entity} 在此设备上没有可设置的运行模式。"
+    },
+    "command_not_accepted": {
+      "message": "{entity} 不支持 {command}。支持的命令：{accepted}。"
+    },
+    "remote_no_commands": {
+      "message": "{entity} 没有可单独发送的命令。请选择一个活动来开启它。"
+    },
+    "remote_cannot_learn": {
+      "message": "{entity} 无法学习命令。可用活动由设备提供。"
+    },
+    "remote_no_stored_commands": {
+      "message": "{entity} 没有已保存的命令可删除。"
+    },
+    "upload_invalid": {
+      "message": "profile `{filename}` 校验失败，因此未保存：{detail}"
     }
   },
   "config": {
     "step": {
       "user": {
-        "title": "连接模式",
-        "description": "选择如何连接您的 ESP 设备。\n\n• **本地控制**：通过 mDNS 发现本地网络中的设备（推荐，延迟低）\n• **云端控制**：通过 ESP RainMaker 云端连接（适用于设备不在本地网络时）",
+        "title": "添加 ESP-Weaver 设备",
+        "description": "如果您想要更新自定义产品，可在此上传产品配置文件。",
         "data": {
-          "connection_mode": "连接模式"
+          "profile_file": "产品配置文件",
+          "overwrite": "替换现有同名文件",
+          "repository_source": "从 pull request 读取仓库"
+        },
+        "data_description": {
+          "overwrite": "仅在需要替换同名自定义配置文件时启用。",
+          "repository_source": "留空即使用已发布的仓库。输入 pull request 编号或 URL，可使用其最新提交生成的产品列表；该选择会一直生效，直到清空此字段。"
+        }
+      },
+      "connection_mode": {
+        "title": "选择连接方式",
+        "description": "请选择 ESP-Weaver 连接设备的方式。\n\n• **本地控制**：查找与 Home Assistant 连接到同一网络的设备\n• **云端控制**：通过 ESP RainMaker 连接",
+        "data": {
+          "connection_mode": "连接方式"
         }
       },
       "rainmaker_login": {
         "title": "RainMaker 登录",
-        "description": "登录您的 ESP RainMaker 账户。\n\n输入您的 RainMaker 凭据以访问云端设备。",
+        "description": "请登录 ESP RainMaker 账户，以查看并添加账户中的设备。",
         "data": {
           "rainmaker_region": "区域",
           "email": "邮箱",
           "password": "密码"
         },
         "data_description": {
-          "rainmaker_region": "选择您的设备注册所在的 RainMaker 区域。",
-          "email": "您的 ESP RainMaker 账户邮箱地址。",
-          "password": "您的 ESP RainMaker 账户密码。"
+          "rainmaker_region": "设备注册所在的 RainMaker 区域。"
         }
       },
       "cloud_action_select": {
         "title": "选择操作",
-        "description": "选择您要执行的操作：\n\n• **添加现有设备**：添加已在 RainMaker 账户中注册的设备\n• **配网新设备**：通过蓝牙配置新设备并添加到您的账户",
+        "description": "请选择添加账户中已有的设备，或通过蓝牙设置新设备。",
         "data": {
           "action": "操作"
         }
       },
       "ble_scan": {
-        "title": "输入设备名称",
-        "description": "给 ESP 设备上电，查看串口日志中类似如下的信息：\n\n**Provisioning started with service name : PROV_XXXXXX**\n\n在下方输入设备名称（如 PROV_724d86）。",
+        "title": "输入配网服务名称",
+        "description": "请给设备上电，然后输入串口日志中显示的配网服务名称，例如 `PROV_724d86`。",
         "data": {
-          "device_name": "设备名称（来自串口日志）"
+          "device_name": "配网服务名称"
         }
       },
       "wifi_config": {
-        "title": "WiFi 配置",
-        "description": "为设备「{device_name}」输入 WiFi 凭据。\n\n配网完成后，设备将连接到此 WiFi 网络。",
+        "title": "配置 Wi-Fi",
+        "description": "请输入 **{device_name}** 要使用的 Wi-Fi 信息。",
         "data": {
-          "wifi_ssid": "WiFi 网络名称 (SSID)",
-          "wifi_password": "WiFi 密码",
-          "device_pop": "PoP 所有权证明码（可选）"
+          "wifi_ssid": "Wi-Fi SSID",
+          "wifi_password": "Wi-Fi 密码",
+          "device_pop": "PoP（设备所有权凭证，可选）"
         },
         "data_description": {
-          "wifi_ssid": "要连接的 WiFi 网络名称。",
-          "wifi_password": "WiFi 网络的密码。",
-          "device_pop": "如果设备需要，请输入所有权证明码。"
+          "device_pop": "设备随附的 PoP（如需要）。"
         }
       },
-      "provisioning": {
-        "title": "正在配网设备",
-        "description": "正在向设备发送 WiFi 凭据并连接到云端...\n\n此过程可能需要最多 2 分钟，请耐心等待。"
+      "provisioning_failed": {
+        "title": "设备设置未完成",
+        "description": "无法添加设备：{error}\n\n您可以重试，或返回检查 Wi-Fi 设置。",
+        "data": {
+          "action": "操作"
+        }
       },
       "cloud_device_select": {
         "title": "选择云端设备",
-        "description": "发现 {device_count} 个 ESP RainMaker 设备。选择一个添加。\n\n标记为「在线」的设备当前已连接到云端。",
+        "description": "您的 ESP RainMaker 账户中有 {device_count} 台设备可用，请选择要添加的设备。",
         "data": {
           "selected_device": "设备"
-        },
-        "data_description": {
-          "selected_device": "选择要添加的 ESP RainMaker 设备。"
         }
       },
       "pop_input": {
-        "title": "需要安全认证",
-        "description": "设备 \"{device_name}\" ({device_ip}) 需要认证。",
+        "title": "输入设备所有权凭证（PoP）",
+        "description": "您可以在 ESP RainMaker App 的设备 **Node Info** 页面中查看 PoP，并在此输入。",
         "data": {
-          "custom_pop": "PoP 认证码"
-        },
-        "data_description": {
-          "custom_pop": "请输入设备上配置的 PoP（所有权证明）码。"
+          "custom_pop": "PoP",
+          "action": "操作"
         }
       },
       "device_setup": {
         "title": "选择设备",
-        "description": "发现 {device_count} 个 ESP 设备。选择一个添加。\n\n设备格式：名称 (IP) [安全性]\n• Open = 无需认证\n• Protected = 需要认证码\n\n您可以稍后添加其他设备。",
+        "description": "{matched}{silent_note}",
         "data": {
-          "selected_device": "设备"
-        },
-        "data_description": {
-          "selected_device": "选择要添加的 ESP 设备。"
+          "selected_device": "设备",
+          "action": "操作"
         }
+      },
+      "profile_vendor": {
+        "title": "选择厂商",
+        "description": "{result}{repository}",
+        "data": {
+          "vendor": "厂商",
+          "action": "操作"
+        }
+      },
+      "profile_select": {
+        "title": "选择 {vendor} 产品",
+        "description": "请选择与设备匹配的产品。可输入名称或型号筛选列表。",
+        "data": {
+          "profile": "产品",
+          "action": "操作"
+        }
+      },
+      "device_mismatch": {
+        "title": "产品不匹配",
+        "description": "所选产品：**{product}**\n\n设备型号：**{reported_model}**\n\n{reason}\n\n设备尚未添加。选择**提交**可在保持设备连接的情况下重新选择产品；关闭对话框则取消添加。"
       }
     },
+    "progress": {
+      "provisioning": "正在设置 **{device_name}**……正通过蓝牙发送 Wi-Fi 凭据，可能需要几分钟。"
+    },
     "error": {
-      "no_devices_selected": "请选择一个设备。",
-      "pop_required": "PoP 认证码是必需的。",
-      "invalid_pop": "PoP 认证码无效，请检查后重试。",
-      "unknown": "发生未知错误。",
-      "cannot_connect": "无法连接到设备。",
-      "timeout": "连接超时。",
-      "invalid_auth": "认证失败。",
-      "invalid_device_selection": "无效的设备选择。",
-      "rainmaker_not_logged_in": "未登录 RainMaker。请输入您的凭据。",
-      "rainmaker_login_failed": "RainMaker 认证失败。请检查您的凭据。",
-      "provisioning_failed": "设备配网失败。请确保设备处于配网模式后重试。",
-      "wifi_ssid_required": "WiFi 网络名称是必需的。"
+      "pop_required": "请输入设备 PoP。",
+      "invalid_pop": "PoP 无效，请检查后重试。",
+      "cannot_connect": "无法连接到设备。请确认设备已开机，并与 Home Assistant 连接到同一网络。",
+      "invalid_device_selection": "请从列表中选择一个设备。",
+      "rainmaker_not_logged_in": "请先登录 RainMaker。",
+      "rainmaker_login_failed": "无法登录 RainMaker，请检查账户凭据。",
+      "provisioning_failed": "无法设置设备。请确认设备处于配网模式后重试。",
+      "wifi_ssid_required": "请输入 Wi-Fi SSID。",
+      "wifi_password_required": "请输入 Wi-Fi 密码。不支持开放网络。",
+      "profile_import_failed": "profile 导入失败，因此未保存：{error}",
+      "import_bad_filename": "`{filename}` 不是有效的 profile 文件名。文件名必须以 .yaml 或 .yml 结尾，且不能包含目录路径。",
+      "import_exists": "`{filename}` 已存在。如需替换，请启用“替换现有同名文件”。",
+      "import_write_failed": "无法将 `{filename}` 写入 profile 目录：{error}",
+      "upload_expired": "该上传已失效，请重新选择文件。",
+      "upload_invalid": "profile `{filename}` 校验失败，因此未保存：{detail}",
+      "upload_not_text": "所选文件不是 UTF-8 文本。请另存为 UTF-8 后重新选择。",
+      "upload_too_large": "`{filename}` 的大小超过 profile 的 {limit} KB 限制。请确认选择了正确的文件。",
+      "upload_unreadable": "无法读取所选文件：{error}",
+      "profile_unknown": "请从列表中选择产品。输入只用于过滤列表。",
+      "profile_fetch_failed": "无法加载所选产品。请检查网络连接，或选择其他产品。",
+      "vendor_unknown": "请从列表中选择厂商。输入只用于过滤列表。",
+      "provisioning_not_in_cloud": "设备已连接 Wi-Fi，但尚未出现在您的 ESP RainMaker 账户中。请稍候片刻再重试。",
+      "provisioning_ambiguous": "设置期间有多台设备加入了您的账户（{error}），因此无法确定哪一台是新设备。当前没有添加任何设备，请改从云端设备列表中选择。",
+      "repository_source_invalid": "请输入 pull request 编号（如 `123`），或其 GitHub 页面 URL。",
+      "repository_source_unreachable": "无法从 GitHub 读取 `{source}`：{error}"
     },
     "abort": {
-      "already_configured": "设备已配置。",
-      "no_devices_found": "未在网络中发现 ESP 设备。",
-      "no_new_devices_found": "所有发现的设备均已配置。",
-      "no_node_id": "设备没有有效的节点 ID。",
-      "no_options_available": "此设备没有可用的配置选项。"
+      "already_configured": "此设备已配置。",
+      "no_devices_found": "未找到设备。请确认设备已开机，并与 Home Assistant 连接到同一网络，然后重试。",
+      "security_unknown": "**{device_name}** 在连接设置期间没有响应，因此未添加。请等待设备完成启动后重试。",
+      "node_unread": "已连接设备，但设备未提供完成添加所需的信息。请确认设备在线后重试。",
+      "no_new_devices_found": "发现的设备均已添加。",
+      "no_fitting_devices": "发现 {found} 台尚未添加的设备，但没有与 **{product}** 匹配的设备。请检查所选产品，并确认目标设备已开机且与 Home Assistant 连接到同一网络。",
+      "summary_failed": "所选产品无法用于此设备，因此未添加设备。请选择其他产品后重试；如果问题仍然存在，请查看日志并报告问题。"
+    }
+  },
+  "selector": {
+    "connection_mode": {
+      "options": {
+        "local": "本地控制",
+        "cloud": "云端控制（ESP RainMaker）"
+      }
+    },
+    "cloud_action": {
+      "options": {
+        "existing": "添加已有设备",
+        "provision": "通过蓝牙为新设备配网"
+      }
+    },
+    "provisioning_action": {
+      "options": {
+        "retry": "重试",
+        "back": "返回 Wi-Fi 设置"
+      }
+    },
+    "rainmaker_region": {
+      "options": {
+        "global": "全球 (api.rainmaker.espressif.com)"
+      }
+    },
+    "nav_action": {
+      "options": {
+        "next": "下一步",
+        "back": "上一步"
+      }
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "ESP-Weaver 选项",
-        "description": "当前没有可用的配置选项。"
+        "title": "更换产品",
+        "description": "当前产品：**{current}**\n\n选择新产品的厂商。更换产品会重新创建设备实体；可以继续使用的实体会保留历史记录。{repository}",
+        "data": {
+          "vendor": "厂商"
+        }
+      },
+      "profile_select": {
+        "title": "选择 {vendor} 产品",
+        "description": "当前产品：**{current}**\n\n选择新产品。输入关键字可过滤，只有必要时才会显示来源。",
+        "data": {
+          "profile": "产品",
+          "action": "操作"
+        }
+      },
+      "device_mismatch": {
+        "title": "产品不匹配",
+        "description": "所选产品：**{product}**\n\n设备型号：**{reported_model}**\n\n{reason}\n\n产品未更改。选择**提交**可重新选择产品；关闭对话框则保留当前产品。"
       }
+    },
+    "error": {
+      "profile_unknown": "请从列表中选择产品。输入只用于过滤列表。",
+      "profile_fetch_failed": "无法加载所选产品。请检查网络连接，或选择其他产品。",
+      "vendor_unknown": "请从列表中选择厂商。输入只用于过滤列表。"
+    },
+    "abort": {
+      "node_unread": "设备尚未提供更换产品所需的信息。请确认设备在线后重试。",
+      "summary_failed": "所选产品无法用于此设备，因此未做任何更改。请选择其他产品后重试；如果问题仍然存在，请查看日志并报告问题。"
     }
   },
   "entity": {
@@ -251,9 +446,6 @@
       "illuminance": {
         "name": "照度"
       },
-      "battery_level": {
-        "name": "电池电量"
-      },
       "ambient_humidity": {
         "name": "环境湿度"
       },
@@ -265,6 +457,9 @@
       },
       "pm25": {
         "name": "PM2.5"
+      },
+      "run_cycle": {
+        "name": "运行周期"
       }
     },
     "binary_sensor": {
@@ -281,6 +476,9 @@
             "name": "上报间隔"
           }
         }
+      },
+      "connectivity": {
+        "name": "连接状态"
       }
     },
     "light": {
@@ -297,6 +495,9 @@
             "name": "色温百分比"
           }
         }
+      },
+      "lightbulb": {
+        "name": "灯泡"
       }
     },
     "number": {
@@ -337,10 +538,205 @@
         "name": "挥发性有机物最大阈值"
       },
       "pm25_min_threshold": {
-        "name": "PM2.5最小阈值"
+        "name": "PM2.5 最小阈值"
       },
       "pm25_max_threshold": {
-        "name": "PM2.5最大阈值"
+        "name": "PM2.5 最大阈值"
+      },
+      "debounce_time": {
+        "name": "消抖时间"
+      },
+      "gesture_sensitivity": {
+        "name": "手势灵敏度"
+      },
+      "input_sensitivity": {
+        "name": "输入灵敏度"
+      },
+      "report_interval": {
+        "name": "上报间隔"
+      },
+      "update_interval": {
+        "name": "更新间隔"
+      }
+    },
+    "alarm_control_panel": {
+      "alarm_panel": {
+        "name": "安防面板"
+      }
+    },
+    "button": {
+      "factory_reset": {
+        "name": "恢复出厂"
+      },
+      "reboot": {
+        "name": "重启"
+      },
+      "wifi_reset": {
+        "name": "Wi-Fi 重置"
+      }
+    },
+    "climate": {
+      "air_conditioner": {
+        "name": "空调"
+      },
+      "thermostat": {
+        "name": "温控器"
+      }
+    },
+    "cover": {
+      "external_blinds": {
+        "name": "外遮阳"
+      },
+      "garage_door": {
+        "name": "车库门"
+      },
+      "internal_blinds": {
+        "name": "内遮阳"
+      }
+    },
+    "event": {
+      "event": {
+        "name": "事件"
+      }
+    },
+    "fan": {
+      "fan": {
+        "name": "风扇"
+      }
+    },
+    "humidifier": {
+      "humidifier": {
+        "name": "加湿器"
+      }
+    },
+    "lawn_mower": {
+      "lawn_mower": {
+        "name": "割草机"
+      }
+    },
+    "lock": {
+      "garage_door_lock": {
+        "name": "车库门锁"
+      },
+      "lock": {
+        "name": "锁"
+      }
+    },
+    "media_player": {
+      "speaker": {
+        "name": "音箱"
+      },
+      "tv": {
+        "name": "电视"
+      }
+    },
+    "remote": {
+      "remote": {
+        "name": "遥控"
+      }
+    },
+    "select": {
+      "mode": {
+        "name": "模式"
+      }
+    },
+    "siren": {
+      "siren": {
+        "name": "警报器"
+      }
+    },
+    "switch": {
+      "add_zigbee_device": {
+        "name": "添加 Zigbee 设备"
+      },
+      "outlet": {
+        "name": "插座"
+      },
+      "paused": {
+        "name": "已暂停"
+      },
+      "plug": {
+        "name": "插头"
+      },
+      "running": {
+        "name": "运行中"
+      },
+      "socket": {
+        "name": "电源插座"
+      },
+      "switch": {
+        "name": "开关"
+      },
+      "threshold_alarm_enabled": {
+        "name": "阈值报警"
+      }
+    },
+    "text": {
+      "timezone": {
+        "name": "时区"
+      },
+      "timezone_posix": {
+        "name": "时区 (POSIX)"
+      }
+    },
+    "vacuum": {
+      "vacuum": {
+        "name": "吸尘器"
+      }
+    },
+    "valve": {
+      "valve": {
+        "name": "阀门"
+      }
+    },
+    "water_heater": {
+      "water_heater": {
+        "name": "热水器"
+      }
+    }
+  },
+  "issues": {
+    "profile_invalid": {
+      "title": "设备 profile {filename} 无效",
+      "description": "ESP-Weaver 无法从 `{directory}` 加载 profile `{filename}`，因此不会在产品列表中显示。已经使用其保存副本的设备不受影响。\n\n校验错误：\n\n```\n{detail}\n```\n\n修正 profile 后，执行 `esp_weaver.reload` 动作或重新加载集成。"
+    },
+    "profile_misplaced": {
+      "title": "升级时会删除设备 profile {filename}",
+      "description": "profile `{filename}` 存放在 `{directory}` 中，ESP-Weaver 升级时会替换该目录。\n\n请将 profile 移至 Home Assistant 配置目录中的 `{custom_dir}`，然后执行 `esp_weaver.reload` 动作。升级时会保留该目录中的 profile。"
+    },
+    "profile_update": {
+      "title": "{label} 有可用的产品更新",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "更新 {product}",
+            "description": "受影响的设备：{count} 台。当前和更新后的实体数量：\n\n| 设备 | 当前 | 更新后 |\n|---|---|---|\n{rows}\n\n更新会重新创建列表中所有设备的实体；可以继续使用的实体会保留历史记录。如果只想更新一台设备，请打开该设备的**配置**对话框。"
+          }
+        },
+        "abort": {
+          "profile_update_gone": "该更新已变化或不再可用。如果仍需更新，ESP-Weaver 会再次通知您。",
+          "profile_update_fetch_failed": "无法下载产品更新。请检查 Home Assistant 的网络连接，稍后重试。"
+        }
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "重新加载或导入设备 profile",
+      "description": "重新加载本地 profile 目录、在线 profile 列表和所有 ESP-Weaver 设备。如需先导入 profile，请提供其网址；校验失败的 profile 不会保存。",
+      "fields": {
+        "url": {
+          "name": "网址",
+          "description": "profile YAML 文件的网址。留空则重新加载现有 profile。GitHub 文件页面和 gist 网址会自动转换为 raw 网址。"
+        },
+        "filename": {
+          "name": "文件名",
+          "description": "下载后保存的文件名。默认取自链接中的文件名。"
+        },
+        "overwrite": {
+          "name": "覆盖",
+          "description": "当同名文件已存在时是否替换。"
+        }
       }
     }
   }

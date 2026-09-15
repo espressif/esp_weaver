@@ -2,49 +2,20 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Diagnostics support for ESP-Weaver integration.
-
-This module provides diagnostic information for debugging and troubleshooting,
-with proper redaction of sensitive data.
-"""
+"""Diagnostics support for ESP-Weaver integration."""
 
 import logging
 import re
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
-from homeassistant.const import CONF_HOST
+from homeassistant.const import CONF_HOST, CONF_PASSWORD
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 
-from .const import (
-    DIAG_API_STATUS,
-    DIAG_AVAILABLE,
-    DIAG_CONNECTIVITY,
-    DIAG_COORDINATOR,
-    DIAG_COORDINATOR_AVAILABLE,
-    DIAG_DATA,
-    DIAG_DEVICE,
-    DIAG_DEVICE_AVAILABLE,
-    DIAG_DEVICE_DATA,
-    DIAG_DEVICE_DATA_ERROR,
-    DIAG_DEVICE_REGISTERED,
-    DIAG_DISCOVERY_COMPLETED,
-    DIAG_DOMAIN,
-    DIAG_ENTRY,
-    DIAG_IS_AVAILABLE,
-    DIAG_MINOR_VERSION,
-    DIAG_TITLE,
-    DIAG_VERSION,
-    KEY_API_KEY,
-    KEY_PASSWORD,
-    KEY_SECRET,
-    KEY_SERIAL,
-    KEY_TOKEN,
-)
+from .const import CONF_CUSTOM_POP, CONF_NODE_ID
 from .helpers.ha_types import ESPConfigEntry
 from .iot.specs.keys import (
-    CONF_CUSTOM_POP,
-    CONF_NODE_ID,
     KEY_HW_VERSION,
     KEY_IDENTIFIERS,
     KEY_IP,
@@ -55,258 +26,215 @@ from .iot.specs.keys import (
     KEY_POP,
     KEY_SW_VERSION,
 )
+from .profiles import (
+    CUSTOM_PROFILE_DIR,
+    ProfileBinding,
+    ProfileMissingError,
+    async_get_catalog,
+    async_registry_for_entry,
+    build_preview,
+)
+
+if TYPE_CHECKING:
+    from .iot.client.device_api import ESPWeaverApi
 
 _LOGGER = logging.getLogger(__name__)
 
-# Regex pattern for MAC addresses (xx:xx:xx:xx:xx:xx or xx-xx-xx-xx-xx-xx)
+# What a removed value is replaced with, whole or in part.
+REDACTED: Final = "**REDACTED**"
+REDACTED_MAC: Final = "REDACTED_MAC"
+
+# A MAC address as either notation writes it: xx:xx:xx:xx:xx:xx or xx-xx-...
 _MAC_PATTERN = re.compile(r"^([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}$")
 
-# Keys to redact from diagnostics output
-TO_REDACT: Final[set[str]] = {
-    CONF_CUSTOM_POP,
-    KEY_POP,
-    KEY_PASSWORD,
-    KEY_TOKEN,
-    KEY_SECRET,
-    KEY_API_KEY,
-    KEY_MAC,
-    KEY_SERIAL,
-}
-
-# Keys to partially redact (show partial value)
-TO_PARTIALLY_REDACT: Final[set[str]] = {
-    CONF_HOST,
-    KEY_IP,
-    "ip_address",  # Used by some external data structures
-}
+# Keys whose value never leaves the device. Matched as substrings, so each
+# entry covers the compound names firmware and the cloud spell it with.
+SECRET_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        CONF_CUSTOM_POP,
+        CONF_PASSWORD,
+        KEY_POP,
+        KEY_MAC,
+        "token",
+        "secret",
+        "api_key",
+        "serial",
+    }
+)
+# Keys holding an address, kept legible to its last octet. Matched whole.
+ADDRESS_KEYS: Final[frozenset[str]] = frozenset({CONF_HOST, KEY_IP, "ip_address"})
 
 
-def _redact_mac_address(value: str) -> str:
-    """Redact MAC address if the value matches MAC pattern.
-
-    Args:
-        value: The string value to check.
-
-    Returns:
-        "REDACTED_MAC" if value is a MAC address, original value otherwise.
-    """
-    if _MAC_PATTERN.match(value):
-        return "REDACTED_MAC"
-    return value
-
-
-def _redact_identifier(identifier: tuple) -> list:
-    """Redact sensitive data from device identifier tuple.
-
-    Args:
-        identifier: A tuple like (domain, unique_id) from device.identifiers.
-
-    Returns:
-        A list with MAC addresses redacted.
-    """
-    result = []
-    for item in identifier:
-        if isinstance(item, str):
-            result.append(_redact_mac_address(item))
-        else:
-            result.append(item)
-    return result
+def _redact_identifier(identifier: tuple[Any, ...]) -> list[Any]:
+    """Return one device identifier with any MAC address in it taken out."""
+    return [
+        REDACTED_MAC if isinstance(item, str) and _MAC_PATTERN.match(item) else item
+        for item in identifier
+    ]
 
 
 def _redact_ip_address(ip: str) -> str:
-    """Partially redact an IPv4 address, showing only the last octet.
+    """Return an IPv4 address as its last octet only, e.g. ``***.***.***.100``.
 
-    Note: ESP Local Control only supports IPv4 addresses.
-
-    Args:
-        ip: The IP address to redact.
-
-    Returns:
-        Partially redacted IP address (e.g., "***.***.***.100").
+    Anything that is not an IPv4 address is removed outright.
     """
-    if not ip:
-        return "**REDACTED**"
-
-    # IPv4 address (contains dots)
-    if "." in ip:
+    if ip and "." in ip:
         parts = ip.split(".")
         if len(parts) == 4 and all(
             part.isdigit() and 0 <= int(part) <= 255 for part in parts
         ):
             return f"***.***.***.{parts[3]}"
 
-    return "**REDACTED**"
+    return REDACTED
 
 
-def _redact_list_item(
-    item: Any,
-    to_redact: set[str],
-    to_partially_redact: set[str],
-) -> Any:
-    """Redact a single item from a list.
+def redact(value: Any) -> Any:
+    """Return a copy of a structure with the values of secret keys taken out.
 
-    Args:
-        item: The item to potentially redact.
-        to_redact: Keys to fully redact (only applies to dict keys).
-        to_partially_redact: Keys to partially redact (only applies to dict keys).
-
-    Returns:
-        Redacted item or original item if no redaction needed.
+    Secret keys match as substrings (``node_mac``), erring towards
+    over-redaction; address keys match whole and keep their last octet, which
+    a bug report needs. Only keys decide, never values. This is why Home
+    Assistant's ``async_redact_data`` - whole keys, values blanked - is not used.
     """
-    if isinstance(item, dict):
-        return _process_dict_for_redaction(item, to_redact, to_partially_redact)
-    if isinstance(item, list):
-        return [_redact_list_item(i, to_redact, to_partially_redact) for i in item]
-    # Only redact dict keys, not arbitrary string values in lists
-    return item
+    if isinstance(value, list):
+        return [redact(item) for item in value]
+    if not isinstance(value, dict):
+        return value
 
-
-def _process_dict_for_redaction(
-    data: dict[str, Any],
-    to_redact: set[str],
-    to_partially_redact: set[str],
-) -> dict[str, Any]:
-    """Process a dictionary, redacting sensitive keys.
-
-    Args:
-        data: Dictionary to process.
-        to_redact: Keys to fully redact.
-        to_partially_redact: Keys to partially redact.
-
-    Returns:
-        Processed dictionary with redacted values.
-    """
     result: dict[str, Any] = {}
-    for key, value in data.items():
-        key_lower = key.lower()
-
-        # Security: Use substring matching for full redaction to err on the side
-        # of over-redaction. This may redact keys like "machine_id" (contains "mac")
-        # or "authentication_token_info" (contains "token"), but it's safer than
-        # potentially leaking sensitive data. Partial redaction uses exact matching
-        # since IP addresses are less sensitive and over-redaction would reduce
-        # diagnostic utility.
-        if key_lower in to_redact or any(r in key_lower for r in to_redact):
-            result[key] = "**REDACTED**"
-        elif key_lower in to_partially_redact:
-            if isinstance(value, str) and "." in value:
-                # Handle IPv4 addresses (ESP Local Control only supports IPv4)
-                result[key] = _redact_ip_address(value)
-            else:
-                result[key] = "**REDACTED**"
-        elif isinstance(value, dict):
-            result[key] = _process_dict_for_redaction(
-                value, to_redact, to_partially_redact
+    for key, item in value.items():
+        lowered = key.lower()
+        if any(secret in lowered for secret in SECRET_KEYS):
+            result[key] = REDACTED
+        elif lowered in ADDRESS_KEYS:
+            result[key] = (
+                _redact_ip_address(item) if isinstance(item, str) else REDACTED
             )
-        elif isinstance(value, list):
-            result[key] = [
-                _redact_list_item(item, to_redact, to_partially_redact)
-                for item in value
-            ]
         else:
-            result[key] = value
-
+            result[key] = redact(item)
     return result
 
 
-async def _get_redacted_device_data(api: Any, node_id: str) -> dict[str, Any]:
-    """Get device data with redaction applied.
+def _get_redacted_device_data(api: "ESPWeaverApi", node_id: str) -> dict[str, Any]:
+    """Return everything the API layer holds about one node, redacted."""
+    if not (device_data := api.get_device_data(node_id)):
+        return {}
+    return {"device_data": redact(device_data)}
 
-    Args:
-        api: The ESP-Weaver API instance.
-        node_id: The device node ID.
 
-    Returns:
-        Dictionary with redacted device data, or error info if retrieval failed.
-    """
+async def _get_profile_preview(
+    hass: HomeAssistant,
+    entry: ESPConfigEntry,
+    api: "ESPWeaverApi",
+    node_id: str,
+) -> dict[str, Any]:
+    """Rerun the resolution the entities were built from, so a bug report shows it."""
+    node_config, params = api.get_reported_config(node_id)
+    if not node_config:
+        return {"profiles_error": "Device has not reported a config yet"}
+
+    existing = {
+        entity.unique_id
+        for entity in er.async_entries_for_config_entry(
+            er.async_get(hass), entry.entry_id
+        )
+    }
     try:
-        device_data = await api.get_device_data(node_id)
-    except (OSError, TimeoutError, RuntimeError, AttributeError) as err:
-        _LOGGER.error("Failed to retrieve device data for diagnostics: %s", err)
-        return {DIAG_DEVICE_DATA_ERROR: "Failed to retrieve device data"}
+        registry = await async_registry_for_entry(hass, entry)
+        preview = build_preview(
+            registry,
+            node_id,
+            node_config,
+            params,
+            existing_unique_ids=existing,
+        )
+    except (ProfileMissingError, KeyError, TypeError, ValueError) as err:
+        # A report is more use with the failure in it than without one at all.
+        _LOGGER.exception("Failed to build the profile preview for %s", node_id)
+        return {"profiles_error": f"{type(err).__name__}: {err}"}
 
-    if device_data:
-        return {
-            DIAG_DEVICE_DATA: _process_dict_for_redaction(
-                device_data, TO_REDACT, TO_PARTIALLY_REDACT
-            )
+    return {"profiles": preview}
+
+
+async def _get_profile_files(
+    hass: HomeAssistant, entry: ESPConfigEntry
+) -> dict[str, Any]:
+    """Report which product this device is bound to, and what could be offered.
+
+    The profile folder is named relative to the configuration directory.
+    """
+    catalog = await async_get_catalog(hass)
+    binding = ProfileBinding.from_entry(entry)
+    return {
+        "profile_files": {
+            "custom_dir": CUSTOM_PROFILE_DIR,
+            "binding": None
+            if binding is None
+            else {
+                "id": binding.id,
+                "source": binding.source,
+                "hash": binding.hash,
+            },
+            **catalog.describe(),
         }
-    return {}
+    }
+
+
+async def _async_node_details(
+    hass: HomeAssistant,
+    entry: ESPConfigEntry,
+    api: "ESPWeaverApi",
+    node_id: str,
+) -> dict[str, Any]:
+    """Return the sections about the node itself, shared by both reports."""
+    return {
+        **_get_redacted_device_data(api, node_id),
+        **await _get_profile_preview(hass, entry, api, node_id),
+    }
 
 
 async def async_get_config_entry_diagnostics(
-    _hass: HomeAssistant,
+    hass: HomeAssistant,
     entry: ESPConfigEntry,
 ) -> dict[str, Any]:
-    """Return diagnostics for a config entry.
-
-    Args:
-        hass: Home Assistant instance.
-        entry: The config entry to get diagnostics for.
-
-    Returns:
-        Dictionary containing diagnostic information.
-    """
+    """Return diagnostics for a config entry."""
     coordinator = entry.runtime_data
-    node_id = entry.data.get(CONF_NODE_ID)
+    node_id = entry.data[CONF_NODE_ID]
 
     diagnostics_data: dict[str, Any] = {
-        DIAG_ENTRY: {
-            DIAG_TITLE: entry.title,
-            DIAG_DOMAIN: entry.domain,
-            DIAG_VERSION: entry.version,
-            DIAG_MINOR_VERSION: entry.minor_version,
-            DIAG_DATA: _process_dict_for_redaction(
-                dict(entry.data), TO_REDACT, TO_PARTIALLY_REDACT
-            ),
+        "entry": {
+            "title": entry.title,
+            "domain": entry.domain,
+            "version": entry.version,
+            "minor_version": entry.minor_version,
+            "data": redact(dict(entry.data)),
         },
-        DIAG_COORDINATOR: {
-            DIAG_AVAILABLE: bool(coordinator),
-            DIAG_DISCOVERY_COMPLETED: coordinator.discovery_completed
-            if coordinator
-            else False,
-            DIAG_IS_AVAILABLE: coordinator.is_available if coordinator else False,
-        },
+        "coordinator": {"is_available": coordinator.is_available},
     }
+    diagnostics_data.update(await _get_profile_files(hass, entry))
 
-    # Add API status if coordinator exists
-    if node_id and coordinator:
-        api = coordinator.api
-
-        diagnostics_data[DIAG_API_STATUS] = {
-            DIAG_DEVICE_REGISTERED: node_id in api.devices,
-            DIAG_DEVICE_AVAILABLE: await api.is_device_available_async(node_id),
-            DIAG_DISCOVERY_COMPLETED: api.is_discovery_completed(node_id),
-        }
-
-        # Get device data with redaction using shared helper
-        device_data_result = await _get_redacted_device_data(api, node_id)
-        diagnostics_data.update(device_data_result)
+    api = coordinator.api
+    diagnostics_data["api_status"] = {
+        "device_registered": api.get_device(node_id) is not None,
+        "device_available": await api.is_device_available_async(node_id),
+        "discovery_completed": api.is_discovery_completed(node_id),
+    }
+    diagnostics_data.update(await _async_node_details(hass, entry, api, node_id))
 
     return diagnostics_data
 
 
 async def async_get_device_diagnostics(
-    _hass: HomeAssistant,
+    hass: HomeAssistant,
     entry: ESPConfigEntry,
     device: DeviceEntry,
 ) -> dict[str, Any]:
-    """Return diagnostics for a device entry.
-
-    Args:
-        hass: Home Assistant instance.
-        entry: The config entry for this device.
-        device: The device entry to get diagnostics for.
-
-    Returns:
-        Dictionary containing device diagnostic information.
-    """
+    """Return diagnostics for one device, as downloaded from its page."""
     coordinator = entry.runtime_data
-    node_id = entry.data.get(CONF_NODE_ID)
+    node_id = entry.data[CONF_NODE_ID]
 
-    # Device info
     diagnostics_data: dict[str, Any] = {
-        DIAG_DEVICE: {
+        "device": {
             KEY_NAME: device.name,
             KEY_MODEL: device.model,
             KEY_MANUFACTURER: device.manufacturer,
@@ -314,23 +242,17 @@ async def async_get_device_diagnostics(
             KEY_HW_VERSION: device.hw_version,
             KEY_IDENTIFIERS: [_redact_identifier(i) for i in device.identifiers],
         },
-        DIAG_ENTRY: {
-            DIAG_TITLE: entry.title,
+        "entry": {
+            "title": entry.title,
             CONF_NODE_ID: node_id,
         },
     }
 
-    # Add device-specific data
-    if node_id and coordinator:
-        api = coordinator.api
-
-        diagnostics_data[DIAG_CONNECTIVITY] = {
-            DIAG_AVAILABLE: await api.is_device_available_async(node_id),
-            DIAG_COORDINATOR_AVAILABLE: coordinator.is_available,
-        }
-
-        # Get device data with redaction using shared helper
-        device_data_result = await _get_redacted_device_data(api, node_id)
-        diagnostics_data.update(device_data_result)
+    api = coordinator.api
+    diagnostics_data["connectivity"] = {
+        "available": await api.is_device_available_async(node_id),
+        "coordinator_available": coordinator.is_available,
+    }
+    diagnostics_data.update(await _async_node_details(hass, entry, api, node_id))
 
     return diagnostics_data

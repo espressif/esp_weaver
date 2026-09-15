@@ -1,0 +1,35 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: low_power_sleep
+product_label: "Low-power sleep"
+product_labels:
+  zh-Hans: "低功耗休眠"
+model: "*"
+
+devices:
+  # This profile follows the ESP-Weaver low-power example firmware. Home
+  # Assistant uses its four known sleep states for the enum sensor and displays
+  # wake metrics as read-only details; other sleep states appear as unknown.
+  - type: esp.device.low-power-sleep
+    entities:
+      - platform: sensor
+        name: "Sleep State"
+        key: low_power_sleep
+        device_class: enum
+        attributes:
+          state:
+            param: "Sleep State"
+            type: esp.param.sleep_state
+            data_type: string
+            properties: [read]
+            options: [awake, light_sleep, deep_sleep, hibernation]
+        # Wake reasons are firmware-defined, so the profile does not restrict
+        # them to a fixed set.
+        extra_attributes:
+          wake_reason:        { param: "Wake Reason",        type: esp.param.wake_reason,        properties: [read] }
+          wake_window_status: { param: "Wake Window Status", type: esp.param.wake_window_status, properties: [read] }
+          sleep_duration:     { param: "Sleep Duration",     type: esp.param.sleep_duration,     properties: [read] }
+          wake_count:         { param: "Wake Count",         type: esp.param.wake_count,         properties: [read] }

@@ -1,142 +1,224 @@
 ---
-# Quality Scale validation for ESP-Weaver integration
-# Platinum level requirements (highest quality standard)
+# Status against the Home Assistant integration quality scale.
+# https://developers.home-assistant.io/docs/core/integration-quality-scale/
 
 rules:
-  # =========================================================================
-  # Bronze tier - Basic Requirements
-  # =========================================================================
-  config-flow:
+  # Bronze
+  action-setup:
     status: done
     comment: >-
-      Full config flow with device discovery, PoP authentication, and error handling
-
-  entity-unique-id:
-    status: done
-    comment: All entities use unique_id based on node_id and entity type
-
-  action-setup:
-    status: exempt
-    comment: Integration does not register custom actions, uses standard entity services
-
-  reauthentication-flow:
-    status: exempt
-    comment: ESP devices do not support changing PoP after initial setup
-
+      esp_weaver.reload is registered in async_setup, so it exists before any
+      entry is loaded and survives the last device being removed.
   appropriate-polling:
     status: done
     comment: >-
-      Primary updates via HTTP active reports (push), internal polling for availability
-
+      Local nodes are polled over the LAN every 60 seconds to refresh their
+      state and confirm they are still reachable.
+  brands:
+    status: exempt
+    comment: Custom integration, not in the core repository.
+  common-modules:
+    status: done
+    comment: coordinator.py, entity.py and const.py.
+  config-flow:
+    status: done
+  config-flow-test-coverage:
+    status: done
+    comment: >-
+      CI enforces 100% line coverage on config_flow.py and flows/ when config_flow
+      tests are collected; GitLab fails if none are collected. tests/config_flow
+      holds the tests.
+  dependency-transparency:
+    status: done
+    comment: >-
+      The shipped surface is local control only (CLOUD_CONTROL_ENABLED is
+      False). The only requirement in the manifest is protobuf, open source
+      on PyPI. Cloud control is not supported in this release; its code stays
+      in the tree but is not offered in the UI and brings no dependency.
+  docs-actions:
+    status: done
+    comment: >-
+      README, section "Updates" (esp_weaver.reload).
+  docs-high-level-description:
+    status: done
+    comment: README.
+  docs-installation-instructions:
+    status: done
+    comment: README, section "Installation".
+  docs-removal-instructions:
+    status: done
+    comment: README, section "Removing the Integration".
   entity-event-setup:
     status: done
     comment: >-
-      Entities subscribe to events in async_added_to_hass and unsubscribe via async_on_remove
-
-  test-before-setup:
+      Entities subscribe in async_added_to_hass and hand the unsubscribe to
+      async_on_remove.
+  entity-unique-id:
     status: done
-    comment: Connection tested in config flow before creating config entry
+    comment: node_id plus the profile key of the entity.
+  has-entity-name:
+    status: done
+  runtime-data:
+    status: done
+    comment: The coordinator is entry.runtime_data.
+  test-before-configure:
+    status: done
+    comment: >-
+      The local flow opens a session with the PoP before creating the entry;
+      the cloud flow lists the node from the account.
+  test-before-setup:
+    status: todo
+    comment: >-
+      A cloud node without a RainMaker session raises ConfigEntryNotReady. A
+      local node that does not answer is set up anyway, with its entities
+      unavailable until mDNS finds it again: the entities are discovered by
+      the first refresh, after the platforms are forwarded, and a failure
+      there cannot be turned into a retry without forwarding them twice (see
+      _first_refresh in __init__.py). Met for cloud nodes, not for local.
+  unique-config-entry:
+    status: done
+    comment: The node id is the unique id.
 
-  # =========================================================================
-  # Silver tier - Enhanced Requirements
-  # =========================================================================
+  # Silver
+  action-exceptions:
+    status: done
+    comment: >-
+      Every failed write raises HomeAssistantError (write_not_supported,
+      write_refused or write_failed), invalid input ServiceValidationError,
+      all with translation keys.
+  config-entry-unloading:
+    status: done
+  docs-configuration-parameters:
+    status: done
+    comment: >-
+      The Configure dialog rebinds a device to another product: README,
+      section "Device Profiles" › "Updates", and docs/device_profiles.md,
+      "Switching a device already added".
+  docs-installation-parameters:
+    status: done
+    comment: README, section "Installation".
   entity-unavailable:
     status: done
     comment: >-
-      Implemented via api.is_device_available_async() with connection and session state checks
-
-  parallel-updates:
+      Entities follow the coordinator, which reports whether the node
+      answered its last poll.
+  integration-owner:
     status: done
-    comment: PARALLEL_UPDATES = 0 added to all platform files
-
   log-when-unavailable:
     status: done
     comment: >-
-      Device availability changes logged in coordinator.py and connection_manager.py
-
-  coordinator:
+      Coordinator starts unavailable; logs once at info on loss and once on
+      recovery (_set_available), without treating the first successful reach
+      as a recovery.
+  parallel-updates:
     status: done
-    comment: ESPDataUpdateCoordinator with exponential backoff reconnection
-
-  config-entry-unloading:
+    comment: >-
+      sensor, binary_sensor, and event use PARALLEL_UPDATES = 0; platforms that
+      write to the device use 1, since each write is an HTTP request the node
+      handles best one at a time.
+  reauthentication-flow:
+    status: todo
+    comment: >-
+      A local node has no credential that can change. A cloud node whose
+      RainMaker session has expired is retried until the CLI is logged in
+      again, rather than being offered a reauth step.
+  test-coverage:
     status: done
-    comment: async_unload_entry properly cleans up resources and cached data
+    comment: CI fails under 95% coverage.
 
-  # =========================================================================
-  # Gold tier - Advanced Requirements
-  # =========================================================================
-  config-entry-migration:
+  # Gold
+  devices:
     status: done
-    comment: async_migrate_entry implemented for future version upgrades
-
-  options-flow:
+  diagnostics:
+    status: done
+    comment: PoP and other secrets are redacted.
+  discovery:
     status: exempt
     comment: >-
-      No user-configurable options - polling is internal, not user-configurable
-
+      Not the rule's discovery. The manifest declares no zeroconf service and
+      there is no discovery flow, by decision: a device has to be bound to a
+      product profile as it is added, and a discovered-device notification
+      would start that flow without the user having chosen to. Instead the
+      user flow scans mDNS itself and lists what it sees, so nothing is typed
+      in. The trade-off is that a device Home Assistant cannot see over mDNS
+      cannot be added at all: there is no address to type in by hand.
+  discovery-update-info:
+    status: done
+    comment: >-
+      An mDNS announcement with a new address updates the registry and config
+      entry; if there is no live client the node is registered immediately.
+      With a live client the address is stored and a reconnect (after the old
+      socket fails) dials the new endpoint — intentional lazy reconnect.
+  docs-data-update:
+    status: done
+    comment: README, section "Architecture".
+  docs-examples:
+    status: done
+    comment: >-
+      docs/device_profiles.md, sections "File structure" (an annotated profile),
+      "Copy an existing definition" and "Alert events".
+  docs-known-limitations:
+    status: done
+    comment: README, section "Known Limitations".
+  docs-supported-devices:
+    status: done
+    comment: README, section "Device Firmware".
+  docs-supported-functions:
+    status: done
+    comment: README, section "Features".
+  docs-troubleshooting:
+    status: done
+    comment: README, section "Troubleshooting"; docs/device_profiles.md for profiles.
+  docs-use-cases:
+    status: done
+    comment: README, section "Features".
+  dynamic-devices:
+    status: exempt
+    comment: One config entry is one node; there is nothing to add to it.
+  entity-category:
+    status: done
+    comment: Declared per entity in the profile.
+  entity-device-class:
+    status: done
+    comment: Declared per entity in the profile.
+  entity-disabled-by-default:
+    status: exempt
+    comment: >-
+      Every entity is one the profile author chose to expose; nothing is
+      noisy by nature.
+  entity-translations:
+    status: done
+  exception-translations:
+    status: done
+  icon-translations:
+    status: todo
   reconfiguration-flow:
     status: exempt
     comment: >-
-      No user-configurable options needed, device settings auto-discovered from ESP device
-
+      A local node's address is followed by mDNS and its PoP cannot be
+      changed on the device; a cloud node has nothing to configure.
+  repair-issues:
+    status: done
+    comment: Profile problems and available profile updates are raised as issues.
   stale-devices:
     status: done
-    comment: async_remove_config_entry_device allows removal of offline devices
-
-  entity-category:
-    status: done
     comment: >-
-      Threshold numbers use CONFIG category, other entities are primary (no category)
+      async_remove_config_entry_device lets a node be deleted once it has
+      stopped answering.
 
-  entity-disabled-by-default:
-    status: exempt
-    comment: All entities enabled by default as they represent primary device functions
-
-  discovery:
-    status: done
-    comment: >-
-      Config flow uses async_discover_devices() with zeroconf ServiceBrowser
-      for automatic device detection
-
-  exception-translations:
-    status: exempt
-    comment: >-
-      Internal errors use RuntimeError, user-facing errors in config flow use error dict
-
-  # =========================================================================
-  # Platinum tier - Highest Quality
-  # =========================================================================
+  # Platinum
   async-dependency:
+    status: todo
+    comment: >-
+      The local-control transport is http.client run in the executor, and
+      the cloud is reached through the RainMaker CLI as a subprocess.
+  inject-websession:
+    status: todo
+    comment: >-
+      Profile downloads use Home Assistant's session; the device layer has
+      its own transport.
+  strict-typing:
     status: done
-    comment: All operations use async/await, blocking calls via run_in_executor
-
-  test-coverage:
-    status: done
-    comment: 95%+ test coverage with comprehensive unit and integration tests
-
-  integration-tests:
-    status: done
-    comment: Full pytest test suite with pytest-homeassistant-custom-component
-
-  # =========================================================================
-  # Exempt rules (not applicable to this integration)
-  # =========================================================================
-  brands:
-    status: exempt
-    comment: Custom integration, not in core repository
-
-  dhcp:
-    status: exempt
-    comment: Uses mDNS/Zeroconf for device discovery, not DHCP
-
-  mqtt:
-    status: exempt
-    comment: Integration does not use MQTT protocol
-
-  ssdp:
-    status: exempt
-    comment: Uses mDNS/Zeroconf for device discovery, not SSDP
-
-  usb:
-    status: exempt
-    comment: Network-based integration, no USB device support
+    comment: >-
+      mypy runs on custom_components/esp_weaver and tests via pyproject.toml;
+      iot/local_ctrl is excluded.

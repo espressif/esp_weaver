@@ -1,0 +1,26 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: blinds_external
+product_label: "External blinds"
+product_labels:
+  zh-Hans: "外置百叶窗"
+model: "*"
+
+devices:
+  - type: esp.device.blinds-external
+    entities:
+      - platform: cover
+        name: "External Blinds"
+        key: external_blinds
+        device_class: shade
+        attributes:
+          position:
+            param: "Blinds Position"
+            type: esp.param.blinds-position
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 0, max: 100, step: 1 }

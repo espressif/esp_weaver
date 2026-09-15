@@ -13,9 +13,9 @@ rules:
     max: 120
     level: warning
 
-  # Document start: warning only (not all YAML files need ---)
-  document-start:
-    level: warning
+  # Document start: our YAML files are single documents and start
+  # directly with content (a profile's first line is `version: 1`).
+  document-start: disable
 
   # Comments indentation: allow flexibility
   comments-indentation: disable
@@ -24,3 +24,16 @@ rules:
   truthy:
     allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
 
+
+  # The device profiles write inline mappings as "{ min: 0, max: 1 }" and
+  # align columns with extra spaces; that is deliberate, not sloppiness.
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  colons:
+    max-spaces-after: -1
+  commas:
+    max-spaces-after: -1

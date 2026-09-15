@@ -1,0 +1,74 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: imu_gesture
+product_label: "IMU gesture"
+product_labels:
+  zh-Hans: "IMU 手势"
+model: "*"
+
+devices:
+  # Gesture Type supplies the sensor state. When the optional Power parameter
+  # is false, state_when makes the state off instead. No enum device class is
+  # used because firmware may report custom gesture names. Home Assistant shows
+  # the individual gesture and orientation parameters as read-only details,
+  # even if firmware marks them writable.
+  - type: esp.device.imu-gesture
+    entities:
+      - platform: sensor
+        name: "IMU Gesture"
+        key: imu_gesture
+        attributes:
+          # These options include the reference firmware's gesture names and
+          # every state that the composed sensor can report.
+          state:
+            param: "Gesture Type"
+            type: esp.param.gesture-type
+            data_type: string
+            ui_type: esp.ui.text
+            properties: [read]
+            options: ["off", "none", idle, shake, push, circle, flip, toss, rotation, clap_single, clap_double, clap_triple]
+          power:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+            optional: true
+            state_when: { false: "off" }
+        # Momentary gestures reset to idle after two seconds unless another
+        # gesture arrives first.
+        auto_reset: { to: idle, after: 2.0 }
+        extra_attributes:
+          confidence:         { param: "Gesture Confidence", type: esp.param.gesture-confidence,  properties: [read] }
+          sensitivity:        { param: "Sensitivity",        type: esp.param.sensitivity,         properties: [read, write] }
+          x:                  { param: "X Orientation",      type: esp.param.orientation-x,       properties: [read] }
+          y:                  { param: "Y Orientation",      type: esp.param.orientation-y,       properties: [read] }
+          z:                  { param: "Z Orientation",      type: esp.param.orientation-z,       properties: [read] }
+          change:             { param: "Orientation Change", type: esp.param.orientation-change,  properties: [read] }
+          shake_event:        { param: "Shake Event",        type: esp.param.gesture-shake,       properties: [read, write] }
+          push_event:         { param: "Push Event",         type: esp.param.gesture-push,        properties: [read, write] }
+          circle_event:       { param: "Circle Event",       type: esp.param.gesture-circle,      properties: [read, write] }
+          flip_event:         { param: "Flip Event",         type: esp.param.gesture-flip,        properties: [read, write] }
+          toss_event:         { param: "Toss Event",         type: esp.param.gesture-toss,        properties: [read, write] }
+          rotation_event:     { param: "Rotation Event",     type: esp.param.gesture-rotation,    properties: [read, write] }
+          clap_single_event:  { param: "Clap Single Event",  type: esp.param.gesture-clap-single, properties: [read, write] }
+          clap_double_event:  { param: "Clap Double Event",  type: esp.param.gesture-clap-double, properties: [read, write] }
+          clap_triple_event:  { param: "Clap Triple Event",  type: esp.param.gesture-clap-triple, properties: [read, write] }
+
+      # Sensitivity is both adjustable through this number entity and visible
+      # among the gesture sensor's details.
+      - platform: number
+        name: "Gesture Sensitivity"
+        key: gesture_sensitivity
+        entity_category: config
+        attributes:
+          value:
+            param: "Sensitivity"
+            type: esp.param.sensitivity
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 0, max: 100, step: 1 }

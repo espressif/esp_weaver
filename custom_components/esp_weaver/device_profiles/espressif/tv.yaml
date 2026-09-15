@@ -1,0 +1,82 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: tv
+product_label: "TV"
+product_labels:
+  zh-Hans: "电视"
+model: "*"
+
+devices:
+  # The SDK defines ESP_RMAKER_DEVICE_TV but does not define macros for most
+  # media parameters. Their names and types follow the official RainMaker
+  # documentation.
+  - type: esp.device.tv
+    entities:
+      - platform: media_player
+        name: "TV"
+        key: tv
+        device_class: tv
+        # Only Power is required so models with fewer media features still create
+        # an entity; each missing optional parameter hides only its matching control.
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+          source:
+            param: "Input Selector"
+            type: esp.param.input-selector
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+          volume:
+            param: "Volume"
+            type: esp.param.volume
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            optional: true
+            bounds: { min: 0, max: 20, step: 1 }
+            # RainMaker uses a 0–20 volume range, while Home Assistant uses 0–1.
+            scale: { to: [0, 1] }
+          mute:
+            param: "Mute"
+            type: esp.param.mute
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+            optional: true
+          media_state:
+            param: "Media State"
+            type: esp.param.media-activity-state
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+            # When Power is off, Home Assistant reports off. Otherwise, the map
+            # converts RainMaker playback values to Home Assistant's fixed states.
+            map: { Playing: playing, Paused: paused, Stopped: idle, Idle: idle, Buffering: buffering }
+          media_control:
+            param: "Media Control"
+            type: esp.param.media-activity-control
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+            # Home Assistant transport services write the corresponding RainMaker
+            # command by applying this map in reverse.
+            map: { Play: play, Pause: pause, Stop: stop, Next: next, Previous: previous }
+        # Home Assistant exposes Input Selector as the media source. It has no
+        # media-player fields for app or channel selection, so those values are
+        # display-only extra attributes. Channel remains a string to preserve
+        # values such as "12-1", and Channel Relative reports navigation commands.
+        extra_attributes:
+          app:              { param: "App Selector",     type: esp.param.app-selector,      properties: [read, write] }
+          channel:          { param: "Channel",          type: esp.param.channel,           properties: [read, write] }
+          channel_relative: { param: "Channel Relative", type: esp.param.channel-relative,  properties: [read, write] }

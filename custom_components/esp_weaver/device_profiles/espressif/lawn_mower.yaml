@@ -1,0 +1,28 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: lawn_mower
+product_label: "Lawn mower"
+product_labels:
+  zh-Hans: "割草机"
+model: "*"
+
+devices:
+  - type: esp.device.lawn-mower
+    entities:
+      - platform: lawn_mower
+        name: "Lawn Mower"
+        key: lawn_mower
+        attributes:
+          # This extended type uses Home Assistant activity names directly.
+          # Start, pause, and dock services write mowing, paused, and docked.
+          # Returning and error remain read-only states.
+          activity:
+            param: "Activity"
+            type: esp.param.mode
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            options: [mowing, docked, paused, returning, error]

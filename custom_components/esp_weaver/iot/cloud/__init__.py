@@ -2,20 +2,15 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""ESP RainMaker Cloud Control module.
+"""ESP RainMaker cloud control via esp-rainmaker-cli.
 
-This module provides cloud control capabilities via esp-rainmaker-cli.
-
-Features:
-- Login/logout management
-- Device provisioning via BLE (with automatic node mapping)
-- Device parameter get/set
+Not supported in this release: `CLOUD_CONTROL_ENABLED` is off, so the config
+flow does not offer cloud control and nothing here is a declared dependency.
 """
 
-from .rmaker_cli_client import BLEDeviceInfo, CloudDeviceInfo, RainMakerCLIClient
+from .rmaker_cli_client import CloudDeviceInfo, RainMakerCLIClient
 
 __all__ = [
-    "BLEDeviceInfo",
     "CloudDeviceInfo",
     "RainMakerCLIClient",
 ]

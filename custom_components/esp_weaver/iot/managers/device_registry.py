@@ -12,14 +12,11 @@ from typing import Any
 from ..client.client import ESPLocalCtrlClient
 from ..specs.device_specs import DEFAULT_PORT
 from ..specs.keys import (
-    KEY_CURRENT_VALUES,
-    KEY_DEVICE_INFO,
+    KEY_FIRMWARE_VERSION,
     KEY_IP,
     KEY_LAST_SUCCESS,
     KEY_NODE_ID,
-    KEY_PARSED_CONFIG,
     KEY_PORT,
-    KEY_PROPERTIES,
     KEY_REGISTERED,
 )
 
@@ -34,11 +31,13 @@ class DeviceInfo:
     ip: str
     port: int = DEFAULT_PORT
     registered: bool = False
-    device_info: dict[str, Any] = field(default_factory=dict)
-    parsed_config: dict[str, Any] = field(default_factory=dict)
-    current_values: dict[str, Any] = field(default_factory=dict)
-    properties: dict[str, Any] = field(default_factory=dict)
+    # The version the node's config named, kept apart from the config because
+    # an OTA changes it without changing the object model around it.
+    firmware_version: str | None = None
     last_success: float | None = None
+    # The node's config and params exactly as reported; read by diagnostics.
+    raw_config: dict[str, Any] = field(default_factory=dict)
+    raw_params: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -47,10 +46,7 @@ class DeviceInfo:
             KEY_IP: self.ip,
             KEY_PORT: self.port,
             KEY_REGISTERED: self.registered,
-            KEY_DEVICE_INFO: self.device_info,
-            KEY_PARSED_CONFIG: self.parsed_config,
-            KEY_CURRENT_VALUES: self.current_values,
-            KEY_PROPERTIES: self.properties,
+            KEY_FIRMWARE_VERSION: self.firmware_version,
             KEY_LAST_SUCCESS: self.last_success,
         }
 
@@ -65,10 +61,6 @@ class DeviceRegistry:
         self._clients: dict[str, ESPLocalCtrlClient] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._discovery_completed: set[str] = set()
-        self._discovered_platforms: set[str] = set()
-        self._config_entries: dict[str, str] = {}
-
-    # Device Operations
 
     def register_device(
         self,
@@ -76,17 +68,18 @@ class DeviceRegistry:
         ip: str,
         port: int | None = None,
     ) -> DeviceInfo:
-        """Register a new device or update existing one."""
+        """Record a device at this address, or move the record it has there.
+
+        ``registered`` is left to whoever opens the session.
+        """
         if port is None:
             port = self.default_port
 
-        if node_id in self._devices:
-            device = self._devices[node_id]
+        if (device := self._devices.get(node_id)) is not None:
             device.ip = ip
             device.port = port
-            device.registered = True
         else:
-            device = DeviceInfo(node_id=node_id, ip=ip, port=port, registered=True)
+            device = DeviceInfo(node_id=node_id, ip=ip, port=port)
             self._devices[node_id] = device
 
         return device
@@ -99,22 +92,15 @@ class DeviceRegistry:
         """Get all registered devices."""
         return self._devices.copy()
 
-    async def remove_device(self, node_id: str) -> None:
-        """Remove a device from the registry."""
-        client = self._clients.pop(node_id, None)
-        if client:
-            try:
-                await client.disconnect()
-            except (OSError, TimeoutError):
-                _LOGGER.debug(
-                    "Failed to disconnect client for %s during removal", node_id
-                )
+    def remove_device(self, node_id: str) -> None:
+        """Forget a device, its client included. Bookkeeping only, no I/O."""
+        self._clients.pop(node_id, None)
         self._devices.pop(node_id, None)
-        self._locks.pop(node_id, None)
+        # A lock somebody holds stays, or the registration under it would no
+        # longer exclude the next one; a free lock has nothing left to guard.
+        if (lock := self._locks.get(node_id)) is not None and not lock.locked():
+            del self._locks[node_id]
         self._discovery_completed.discard(node_id)
-        self._config_entries.pop(node_id, None)
-
-    # Client Operations
 
     def set_client(self, node_id: str, client: ESPLocalCtrlClient) -> None:
         """Set the ESP Local Control client for a device."""
@@ -136,17 +122,9 @@ class DeviceRegistry:
         """Return all node IDs that have active clients."""
         return list(self._clients.keys())
 
-    # Lock Operations
-
-    def get_lock(self, node_id: str) -> asyncio.Lock:
-        """Get or create a lock for a device."""
-        return self._locks.setdefault(node_id, asyncio.Lock())
-
     def device_lock(self, node_id: str) -> asyncio.Lock:
-        """Get lock for a device (can be used with 'async with')."""
-        return self.get_lock(node_id)
-
-    # Discovery Tracking
+        """Return the one lock serialising work on a device, creating it if new."""
+        return self._locks.setdefault(node_id, asyncio.Lock())
 
     def mark_discovery_completed(self, node_id: str) -> None:
         """Mark initial discovery as completed for a device."""
@@ -156,56 +134,28 @@ class DeviceRegistry:
         """Check if initial discovery is completed for a device."""
         return node_id in self._discovery_completed
 
-    # Platform Discovery Tracking
+    def has_session(self, node_id: str) -> bool:
+        """Return True if a registered device holds a client with a session.
 
-    def add_discovered_platform(self, platform: str) -> bool:
-        """Add a platform to discovered set. Returns True if newly added."""
-        if platform in self._discovered_platforms:
-            return False
-        self._discovered_platforms.add(platform)
-        return True
-
-    # Config Entry Mapping
-
-    def register_config_entry(self, node_id: str, entry_id: str) -> None:
-        """Register a config entry for a device."""
-        self._config_entries[node_id] = entry_id
-
-    def get_config_entry_id(self, node_id: str) -> str | None:
-        """Get the config entry ID for a device."""
-        return self._config_entries.get(node_id)
-
-    # Availability Check
-
-    def is_device_available(self, node_id: str) -> bool:
-        """Check if device is available (registered and has active client)."""
+        What the registry knows, without touching the network: a session
+        whose socket has since died still counts here. Whether the device is
+        reachable is ``is_device_available_async``'s question.
+        """
         device = self.get_device(node_id)
         if not device or not device.registered:
             return False
 
         client = self.get_client(node_id)
-        if not client:
-            return False
-
-        try:
-            return client.session_established and client.transport is not None
-        except AttributeError:
-            # Client in invalid state
-            return False
+        return client is not None and client.has_session
 
     async def is_device_available_async(self, node_id: str) -> bool:
-        """Check if device is available with async connection verification."""
-        if not self.is_device_available(node_id):
+        """Return True if the device's session is up and its socket healthy."""
+        if not self.has_session(node_id):
             return False
 
-        # Re-fetch client (could have been removed between is_device_available check)
+        # Re-fetch: the client could have been removed meanwhile.
         client = self.get_client(node_id)
         if not client:
             return False
-
-        try:
-            return await client.is_connected()
-        except (OSError, AttributeError):
-            # OSError: network-level errors
-            # AttributeError: client in invalid state
-            return False
+        # The client answers False to its own socket errors.
+        return await client.is_connected()

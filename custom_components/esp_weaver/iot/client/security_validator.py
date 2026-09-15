@@ -6,19 +6,29 @@
 
 import asyncio
 import contextlib
-import json
 import logging
-from typing import Any
+from typing import Any, Final
 
 from ..local_ctrl import local_ctrl
+from ..local_ctrl.transport import Transport
+from ..specs.keys import KEY_POP_REQUIRED, KEY_SECURITY_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
-# Connection timeouts
-POP_TEST_DELAY = 0.5  # Reduced from 1.0s - minimal delay needed before connection
-POP_TEST_DISCONNECT_DELAY = (
-    0.5  # Reduced from 10s to 0.5s - brief delay for ESP to release resources
-)
+# Settling time either side of the throwaway connection a PoP test makes.
+POP_TEST_DELAY: Final[float] = 0.5
+POP_TEST_DISCONNECT_DELAY: Final[float] = 0.5
+
+
+def _assume_secured() -> dict[str, Any]:
+    """Return what to assume about a device that would not say: sec1 with a PoP."""
+    return {KEY_SECURITY_VERSION: 1, KEY_POP_REQUIRED: True}
+
+
+def _close_transport(transport: Transport) -> None:
+    """Close a throwaway transport, whatever state the device left it in."""
+    with contextlib.suppress(OSError, RuntimeError):
+        transport.close()
 
 
 class ESPSecurityManager:
@@ -34,181 +44,116 @@ class ESPSecurityManager:
         self._cached_security_info.clear()
 
     async def detect_device_security(self, ip: str, port: int) -> dict[str, Any]:
-        """Detect device security configuration.
-
-        Args:
-            ip: Device IP address
-            port: Device port
-
-        Returns:
-            Dictionary with security_version and pop_required keys
-        """
+        """Ask a device what security it runs; only a real answer is cached."""
         cache_key = (ip, port)
         if cache_key in self._cached_security_info:
             return self._cached_security_info[cache_key]
 
+        service_name = f"{ip}:{port}"
         try:
             # ESP Local Control only supports HTTP transport in this integration.
             # Even when devices listen on 443, the transport implementation is HTTP.
-            transport_type = "http"
-            service_name = f"{ip}:{port}"
+            transport = await self._local_ctrl.get_transport("http", service_name)
+        except OSError as err:
+            _LOGGER.error("Failed to detect security for %s: %s", service_name, err)
+            return _assume_secured()
 
-            transport = await self._local_ctrl.get_transport(
-                transport_type, service_name
-            )
+        if not transport:
+            _LOGGER.warning("Failed to get transport for %s", service_name)
+            return _assume_secured()
 
-            if not transport:
-                _LOGGER.warning("Failed to get transport for %s", service_name)
-                return {"security_version": 1, "pop_required": True}
+        try:
+            security_version, pop_required = await self._query_security(transport)
+        except (OSError, RuntimeError) as err:
+            _LOGGER.error("Error querying security for %s: %s", service_name, err)
+            return _assume_secured()
+        finally:
+            _close_transport(transport)
 
-            # Default to security mode 1 with PoP
-            security_version = 1
-            pop_required = True
+        _LOGGER.info(
+            "Detected security for %s: sec%s, pop=%s",
+            service_name,
+            security_version,
+            pop_required,
+        )
+        self._cached_security_info[cache_key] = {
+            KEY_SECURITY_VERSION: security_version,
+            KEY_POP_REQUIRED: pop_required,
+        }
+        return self._cached_security_info[cache_key]
 
-            try:
-                version_response = transport.send_data("esp_local_ctrl/version", "none")
-                if asyncio.iscoroutine(version_response):
-                    version_response = await version_response
-                version_info = None
-                try:
-                    version_info = json.loads(version_response)
-                except (json.JSONDecodeError, TypeError) as e:
-                    _LOGGER.warning(
-                        "Failed to parse version response from %s: %s",
-                        service_name,
-                        e,
-                    )
+    async def ask_device_security(self, ip: str, port: int) -> int | None:
+        """Return the security version the device itself stated, or None.
 
-                # Method 1: Device directly reports sec_ver (preferred)
-                if (
-                    isinstance(version_info, dict)
-                    and "local_ctrl" in version_info
-                    and "sec_ver" in version_info["local_ctrl"]
-                ):
-                    security_version = version_info["local_ctrl"]["sec_ver"]
+        Unlike ``detect_device_security`` this does not fall back.
+        """
+        security_info = await self.detect_device_security(ip, port)
+        if (ip, port) not in self._cached_security_info:
+            return None
+        return int(security_info[KEY_SECURITY_VERSION])
 
-                    if security_version == 0:
-                        pop_required = False
-                    else:
-                        has_no_pop = await self._local_ctrl.has_capability(
-                            transport, "no_pop"
-                        )
-                        pop_required = not has_no_pop
+    async def _query_security(self, transport: Transport) -> tuple[int, bool]:
+        """Ask a reachable device what security it is running.
 
-                # Method 2: Query capabilities (devices without sec_ver field)
-                else:
-                    has_no_sec = await self._local_ctrl.has_capability(
-                        transport, "no_sec"
-                    )
-                    has_no_pop = await self._local_ctrl.has_capability(
-                        transport, "no_pop"
-                    )
+        From the unencrypted ``version`` document: ``sec_ver`` where stated,
+        else the ``no_sec``/``no_pop`` capabilities; unsaid means sec1 with a PoP.
 
-                    if has_no_sec:
-                        security_version = 0
-                        pop_required = False
-                    else:
-                        security_version = 1
-                        pop_required = not has_no_pop
+        Raises:
+            RuntimeError: If the device did not answer.
+        """
+        info = await self._local_ctrl.version_info(transport)
+        if info is None:
+            raise RuntimeError("no answer to esp_local_ctrl/version")
 
-                _LOGGER.info(
-                    "Detected security for %s: sec%s, pop=%s",
-                    service_name,
-                    security_version,
-                    pop_required,
-                )
-
-                self._cached_security_info[cache_key] = {
-                    "security_version": security_version,
-                    "pop_required": pop_required,
-                }
-
-                return self._cached_security_info[cache_key]
-
-            except (OSError, RuntimeError) as err:
-                _LOGGER.error("Error querying security for %s: %s", service_name, err)
-                return {"security_version": 1, "pop_required": True}
-            finally:
-                if hasattr(transport, "close"):
-                    with contextlib.suppress(Exception):
-                        close_result = transport.close()
-                        if asyncio.iscoroutine(close_result):
-                            await close_result
-
-        except (OSError, TimeoutError, ConnectionError) as err:
-            _LOGGER.error("Failed to detect security for %s:%s: %s", ip, port, err)
-            return {"security_version": 1, "pop_required": True}
+        capabilities = info.get("cap", ())
+        if "sec_ver" in info:
+            security_version = info["sec_ver"]
+        else:
+            security_version = 0 if "no_sec" in capabilities else 1
+        pop_required = security_version != 0 and "no_pop" not in capabilities
+        return security_version, pop_required
 
     async def test_pop_connection(self, ip: str, pop: str, port: int) -> bool:
-        """Test if the provided PoP works for connecting to the device.
-
-        Args:
-            ip: Device IP address
-            pop: Proof of Possession string to test
-            port: Device port
-
-        Returns:
-            True if PoP is valid, False otherwise
-        """
+        """Say whether a PoP the user typed will actually open a session."""
         try:
             await asyncio.sleep(POP_TEST_DELAY)
 
-            cache_key = (ip, port)
-            if cache_key not in self._cached_security_info:
-                raise ValueError(
-                    f"Security info not cached for {ip}:{port}. "
-                    "Call detect_device_security first."
-                )
-            security_info = self._cached_security_info[cache_key]
-            # ESP Local Control only supports HTTP transport in this integration.
-            transport_type = "http"
-            secver = security_info["security_version"]
+            # A fallback is not cached, so a device that was still starting
+            # during detection is asked again here rather than remembered
+            # wrongly.
+            security_info = await self.detect_device_security(ip, port)
+            secver = security_info[KEY_SECURITY_VERSION]
 
             transport = None
             try:
-                service_name = f"{ip}:{port}"
+                # ESP Local Control only supports HTTP transport here.
                 transport = await self._local_ctrl.get_transport(
-                    sel_transport=transport_type,
-                    service_name=service_name,
+                    sel_transport="http",
+                    service_name=f"{ip}:{port}",
                 )
-
                 if not transport:
                     return False
 
-                # Mirror the runtime connection: detect the patch version and,
-                # for sec2, use RainMaker's username "wifiprov" + PoP as password.
-                sec_patch_ver = 0
-                if secver >= 1:
-                    detected = await self._local_ctrl.get_sec_patch_ver(transport)
-                    sec_patch_ver = detected if detected is not None else 0
-
-                security_ctx = self._local_ctrl.get_security(
-                    secver=secver,
-                    sec_patch_ver=sec_patch_ver,
-                    username="wifiprov" if secver == 2 else "",
-                    password=(pop or "") if secver == 2 else "",
-                    pop=pop or "",
-                )
-
-                if not security_ctx:
-                    return False
-
-                session_ok = await self._local_ctrl.establish_session(
-                    transport, security_ctx
-                )
-
-                return bool(session_ok)
+                return await self._handshake(transport, secver, pop)
 
             finally:
                 if transport:
-                    if hasattr(transport, "close"):
-                        with contextlib.suppress(Exception):
-                            close_result = transport.close()
-                            if asyncio.iscoroutine(close_result):
-                                await close_result
+                    _close_transport(transport)
                     # Delay after transport was used to let device release resources
                     await asyncio.sleep(POP_TEST_DISCONNECT_DELAY)
 
-        except (OSError, TimeoutError, ConnectionError) as err:
+        except OSError as err:
             _LOGGER.debug("PoP connection test failed for %s:%s: %s", ip, port, err)
             return False
+
+    async def _handshake(self, transport: Transport, secver: int, pop: str) -> bool:
+        """Try one handshake with the same ``build_security`` the runtime uses.
+
+        Returns:
+            True if the device accepted the PoP.
+        """
+        security_ctx = await self._local_ctrl.build_security(transport, secver, pop)
+        if not security_ctx:
+            return False
+
+        return bool(await self._local_ctrl.establish_session(transport, security_ctx))

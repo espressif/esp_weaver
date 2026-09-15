@@ -1,0 +1,62 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: washer
+product_label: "Washer"
+product_labels:
+  zh-Hans: "洗衣机"
+model: "*"
+
+devices:
+  # Home Assistant has no washer platform, so each controllable parameter
+  # becomes a separate entity. Running State and Paused State are independent
+  # switches; firmware must resolve conflicting writes and report one as false.
+  - type: esp.device.washer
+    entities:
+      - platform: switch
+        name: "Running"
+        key: running
+        device_class: switch
+        attributes:
+          state:
+            param: "Running State"
+            type: esp.param.running-state
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+      - platform: switch
+        name: "Paused"
+        key: paused
+        device_class: switch
+        attributes:
+          state:
+            param: "Paused State"
+            type: esp.param.paused-state
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+      # Mode names are vendor-defined, so Home Assistant obtains the available
+      # choices from the firmware's valid value list.
+      - platform: select
+        name: "Mode"
+        key: mode
+        attributes:
+          state:
+            param: "Mode"
+            type: esp.param.mode
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+      - platform: sensor
+        name: "Run Cycle"
+        key: run_cycle
+        device_class: enum
+        attributes:
+          state:
+            param: "Run Cycle"
+            type: esp.param.run-cycle
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read]

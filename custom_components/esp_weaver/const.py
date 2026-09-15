@@ -2,159 +2,99 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Home Assistant-specific constants for ESP-Weaver.
+"""Integration-wide constants and tuning knobs.
 
-IoT-layer constants (KEY_*, EVENT_*, SENSOR_TYPE_*, etc.) should be imported
-directly from iot.specs submodules.
+A name only one module uses lives in that module. IoT-layer constants (KEY_*,
+RAINMAKER_*) come from ``iot.specs``.
 """
 
 from typing import Final
 
 from homeassistant.const import Platform
 
-# =============================================================================
-# PLATFORMS
-# =============================================================================
+from .identity import DOMAIN
+
+# The one event the integration fires: a sensor alert beginning or ending.
+# docs/device_profiles_in_detail.md lists the fields.
+EVENT_ALERT: Final = f"{DOMAIN}_alert"
+# `kind` in the event data: a level the profile declares on an attribute, or
+# a reading past a threshold number the user set.
+ALERT_KIND_LEVEL: Final = "level"
+ALERT_KIND_THRESHOLD: Final = "threshold"
+# `end` in a threshold event: which end of the user's range a reading went
+# past. Also names the translation string the message is worded from.
+THRESHOLD_ALERT_HIGH: Final = "high"
+THRESHOLD_ALERT_LOW: Final = "low"
 
 PLATFORMS: Final[tuple[Platform, ...]] = (
+    Platform.ALARM_CONTROL_PANEL,
     Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.CLIMATE,
+    Platform.COVER,
+    Platform.DATE,
+    Platform.DATETIME,
+    Platform.EVENT,
+    Platform.FAN,
+    Platform.HUMIDIFIER,
+    Platform.LAWN_MOWER,
     Platform.LIGHT,
+    Platform.LOCK,
+    Platform.MEDIA_PLAYER,
     Platform.NUMBER,
+    Platform.REMOTE,
+    Platform.SELECT,
     Platform.SENSOR,
+    Platform.SIREN,
+    Platform.SWITCH,
+    Platform.TEXT,
+    Platform.TIME,
+    Platform.VACUUM,
+    Platform.VALVE,
+    Platform.WATER_HEATER,
 )
 
+# Config entry keys
+CONF_NODE_ID: Final = "node_id"
+CONF_CUSTOM_POP: Final = "custom_pop"
+CONF_SECURITY_VERSION: Final = "security_version"
+CONF_CONNECTION_MODE: Final = "connection_mode"
+CONF_RAINMAKER_REGION: Final = "rainmaker_region"
+# Whether the device's mDNS record said what it is; False for older firmware,
+# whose model is then not held against the product (profiles/fit.py).
+CONF_IDENTITY_ADVERTISED: Final = "identity_advertised"
 
-# =============================================================================
-# ENTITY DISCOVERY CACHE KEYS
-# =============================================================================
+# Whether the config flow offers cloud control next to local control.
+# Off: cloud control is not supported in this release. New entries are
+# local-only; the cloud modules stay in the tree but are not offered in the UI
+# and bring no dependency into the manifest.
+CLOUD_CONTROL_ENABLED: Final[bool] = False
 
-CACHE_SENSORS: Final = "sensors"
-CACHE_BINARY_SENSORS: Final = "binary_sensors"
-CACHE_LIGHTS: Final = "lights"
-CACHE_NUMBERS: Final = "numbers"
+# Whether the first step of the config flow offers the field that reads the
+# profile repository from a pull request. Off: the field is not shown and the
+# step neither reads nor changes what the repository copy follows. The
+# mechanism itself (``RepositoryRef``, the mirror, the vendor step's note)
+# stays in the tree, to be offered again when it is needed.
+REPOSITORY_SOURCE_FIELD_ENABLED: Final[bool] = False
 
-
-# =============================================================================
-# TIMEOUTS & RETRY SETTINGS
-# =============================================================================
-
+# Timeouts, polling and retry
 DEVICE_SETUP_TIMEOUT: Final = 15
 DEFAULT_UPDATE_INTERVAL_SECONDS: Final = 60
 RECONNECT_DELAYS: Final[tuple[int, ...]] = (1, 2, 4, 8, 16, 30)
-MAX_CONSECUTIVE_FAILURES: Final = 3
-DEFAULT_GESTURE_DISPLAY_DURATION: Final = 2.0
+# How often, at most, a write that found no parameter to address has the
+# node's structure read again.
+REDISCOVERY_MIN_INTERVAL_SECONDS: Final = 60
 
 # Cloud device availability
 CLOUD_CONNECTIVITY_CHECK_POLLS: Final = 5  # Check connectivity every 5th poll (~5 min)
 CLOUD_PARAMS_FAILURE_THRESHOLD: Final = 3
 CLOUD_DISCOVERY_FAILURE_THRESHOLD: Final = 3
 
+# A cloud node's firmware version lives in its config, which only an OTA
+# changes; re-read it this often (one extra call per node per quarter hour).
+CLOUD_FIRMWARE_CHECK_POLLS: Final = 15
 
-# =============================================================================
-# PLATFORM IDENTIFIERS
-# =============================================================================
-
-PLATFORM_LIGHT: Final = Platform.LIGHT.value
-PLATFORM_SENSOR: Final = Platform.SENSOR.value
-PLATFORM_BINARY_SENSOR: Final = Platform.BINARY_SENSOR.value
-PLATFORM_NUMBER: Final = Platform.NUMBER.value
-
-
-# =============================================================================
-# ENTITY NAMES
-# =============================================================================
-
-ENTITY_NAME_LIGHT: Final = "Light"
-ENTITY_NAME_BINARY_SENSOR: Final = "Binary Sensor"
-ENTITY_NAME_BATTERY_ENERGY: Final = "Battery Energy"
-ENTITY_NAME_IMU_GESTURE: Final = "IMU Gesture"
-ENTITY_NAME_INTERACTIVE_INPUT: Final = "Interactive Input"
-ENTITY_NAME_LOW_POWER_SLEEP: Final = "Low Power Sleep"
-
-
-# =============================================================================
-# ENTITY ATTRIBUTES
-# =============================================================================
-
-ATTR_LAST_UPDATED: Final = "last_updated"
-ATTR_BINARY_SENSOR_TYPE: Final = "binary_sensor_type"
-ATTR_ORIENTATION_X: Final = "orientation_x"
-ATTR_ORIENTATION_Y: Final = "orientation_y"
-ATTR_ORIENTATION_Z: Final = "orientation_z"
-ATTR_ORIENTATION_CHANGE: Final = "orientation_change"
-
-LIGHT_EFFECT_MODE_PREFIX: Final = "Mode "
-
-
-# =============================================================================
-# ALERT TYPES
-# =============================================================================
-
-ALERT_TYPE_HIGH: Final = "high"
-ALERT_TYPE_LOW: Final = "low"
-
-
-# =============================================================================
-# SERVICE CONSTANTS
-# =============================================================================
-
-SERVICE_PERSISTENT_NOTIFICATION: Final = "persistent_notification"
-SERVICE_CREATE: Final = "create"
-SERVICE_DISMISS: Final = "dismiss"
-
-
-# =============================================================================
-# CONFIG FLOW
-# =============================================================================
-
-ERROR_POP_REQUIRED: Final = "pop_required"
-ERROR_INVALID_POP: Final = "invalid_pop"
-ERROR_INVALID_DEVICE: Final = "invalid_device_selection"
-ERROR_CANNOT_CONNECT: Final = "cannot_connect"
-ERROR_RAINMAKER_NOT_LOGGED_IN: Final = "rainmaker_not_logged_in"
-ERROR_RAINMAKER_LOGIN_FAILED: Final = "rainmaker_login_failed"
-ERROR_PROVISIONING_FAILED: Final = "provisioning_failed"
-ERROR_WIFI_SSID_REQUIRED: Final = "wifi_ssid_required"
-ABORT_NO_DEVICES: Final = "no_devices_found"
-ABORT_NO_NEW_DEVICES: Final = "no_new_devices_found"
-STEP_DEVICE_SETUP: Final = "device_setup"
-STEP_POP_INPUT: Final = "pop_input"
-STEP_CLOUD_DEVICE_SELECT: Final = "cloud_device_select"
-STEP_RAINMAKER_LOGIN: Final = "rainmaker_login"
-STEP_CLOUD_ACTION_SELECT: Final = "cloud_action_select"
-STEP_BLE_SCAN: Final = "ble_scan"
-STEP_WIFI_CONFIG: Final = "wifi_config"
-STEP_PROVISIONING: Final = "provisioning"
-FIELD_SELECTED_DEVICE: Final = "selected_device"
-PLACEHOLDER_DEVICE_COUNT: Final = "device_count"
-PLACEHOLDER_DEVICE_NAME: Final = "device_name"
-PLACEHOLDER_DEVICE_IP: Final = "device_ip"
-
-
-# =============================================================================
-# DIAGNOSTICS
-# =============================================================================
-
-KEY_PASSWORD: Final = "password"
-KEY_TOKEN: Final = "token"
-KEY_SECRET: Final = "secret"
-KEY_API_KEY: Final = "api_key"
-KEY_SERIAL: Final = "serial"
-DIAG_ENTRY: Final = "entry"
-DIAG_COORDINATOR: Final = "coordinator"
-DIAG_API_STATUS: Final = "api_status"
-DIAG_DEVICE: Final = "device"
-DIAG_DEVICE_DATA: Final = "device_data"
-DIAG_DEVICE_DATA_ERROR: Final = "device_data_error"
-DIAG_CONNECTIVITY: Final = "connectivity"
-DIAG_TITLE: Final = "title"
-DIAG_DOMAIN: Final = "domain"
-DIAG_VERSION: Final = "version"
-DIAG_MINOR_VERSION: Final = "minor_version"
-DIAG_DATA: Final = "data"
-DIAG_AVAILABLE: Final = "available"
-DIAG_DISCOVERY_COMPLETED: Final = "discovery_completed"
-DIAG_IS_AVAILABLE: Final = "is_available"
-DIAG_DEVICE_REGISTERED: Final = "device_registered"
-DIAG_DEVICE_AVAILABLE: Final = "device_available"
-DIAG_COORDINATOR_AVAILABLE: Final = "coordinator_available"
+# A node appears in the account before the cloud has stored its config;
+# these bound the wait for the config.
+CLOUD_CONFIG_WAIT_ATTEMPTS: Final = 6
+CLOUD_CONFIG_WAIT_INTERVAL: Final = 5

@@ -1,0 +1,743 @@
+{
+  "common": {
+    "problem_conflict": "{param} {field} does not match (product: {declared}; device: {reported})",
+    "problem_not_reported": "The device did not provide: {params}",
+    "profile_imported": "Imported {filename}. You can select it from the product list.",
+    "device_online": "Online",
+    "device_offline": "Offline",
+    "devices_matched": "Devices matching **{product}**: {count}",
+    "other_devices": "Found {silent} device(s) listed as Other device (no model information provided).",
+    "repository_offline": "If the expected manufacturer is not in the list, check Home Assistant's network connection and try again.",
+    "repository_following": "Profiles are being read from pull request {source} at commit {commit}, instead of the published repository. Clear the pull request field on the first step to use the published repository.",
+    "repository_following_unread": "Profiles are set to be read from pull request {source}, but it has not been read successfully. Clear the pull request field on the first step to use the published repository.",
+    "source_builtin": "built-in",
+    "source_local": "custom file",
+    "source_cached": "saved",
+    "source_repo": "online",
+    "source_repo_following": "pull request {source}",
+    "mismatch_model": "The device model is missing or does not match the selected product.",
+    "threshold_high_title": "{device}: {sensor} too high",
+    "threshold_high_message": "{sensor} reads {value}{unit}, above the {threshold}{unit} limit you set.",
+    "threshold_low_title": "{device}: {sensor} too low",
+    "threshold_low_message": "{sensor} reads {value}{unit}, below the {threshold}{unit} limit you set."
+  },
+  "exceptions": {
+    "profile_unbound": {
+      "message": "{device} is missing its product information. Remove the device, then add it again and select the correct product."
+    },
+    "profile_missing": {
+      "message": "The saved product information for {device} is no longer available. Remove the device, then add it again and select the correct product."
+    },
+    "min_threshold_too_high": {
+      "message": "Minimum threshold ({value}) must be less than maximum threshold ({max_value})."
+    },
+    "max_threshold_too_low": {
+      "message": "Maximum threshold ({value}) must be greater than minimum threshold ({min_value})."
+    },
+    "import_bad_filename": {
+      "message": "`{filename}` is not a valid profile filename. Use a filename ending in .yaml or .yml, without a directory path."
+    },
+    "import_download_failed": {
+      "message": "Could not download the profile from {url}: {error}"
+    },
+    "import_too_large": {
+      "message": "The file at {url} exceeds the {limit} KB profile size limit. Check that the link points directly to the profile file."
+    },
+    "import_not_text": {
+      "message": "The file at {url} is not UTF-8 text. If this is a GitHub file page, use its raw link."
+    },
+    "import_invalid": {
+      "message": "The downloaded profile `{filename}` failed validation, so nothing was saved: {detail}"
+    },
+    "import_exists": {
+      "message": "`{filename}` already exists. Call the action again with overwrite enabled to replace it."
+    },
+    "import_write_failed": {
+      "message": "Could not write `{filename}` to the profile directory: {error}"
+    },
+    "reload_filename_without_url": {
+      "message": "Enter the URL of the profile to download, or leave both fields empty to reload the existing profiles."
+    },
+    "upload_too_large": {
+      "message": "`{filename}` exceeds the {limit} KB profile size limit. Check that you selected the correct file."
+    },
+    "upload_not_text": {
+      "message": "The uploaded file is not UTF-8 text. Save it as UTF-8 and choose it again."
+    },
+    "upload_expired": {
+      "message": "The upload is no longer available. Please choose the file again."
+    },
+    "upload_unreadable": {
+      "message": "Could not read the upload: {error}"
+    },
+    "write_not_supported": {
+      "message": "{entity} cannot be controlled because this device does not provide a writable setting for it."
+    },
+    "write_refused": {
+      "message": "The device rejected the change to {entity}."
+    },
+    "write_failed": {
+      "message": "Could not reach the device to change {entity}."
+    },
+    "cannot_turn_off": {
+      "message": "{entity} cannot be turned off on this device."
+    },
+    "no_mode_to_set": {
+      "message": "{entity} has no mode to set on this device."
+    },
+    "no_operation_to_set": {
+      "message": "{entity} has no operation to set on this device."
+    },
+    "command_not_accepted": {
+      "message": "{entity} does not support {command}. Supported commands: {accepted}."
+    },
+    "remote_no_commands": {
+      "message": "{entity} has no individual commands to send. Turn it on by selecting one of its activities."
+    },
+    "remote_cannot_learn": {
+      "message": "{entity} cannot learn commands. Its available activities are provided by the device."
+    },
+    "remote_no_stored_commands": {
+      "message": "{entity} has no stored commands to delete."
+    },
+    "upload_invalid": {
+      "message": "The profile `{filename}` failed validation, so nothing was saved: {detail}"
+    }
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add an ESP-Weaver device",
+        "description": "To update a custom product, upload its product profile here.",
+        "data": {
+          "profile_file": "Product profile",
+          "overwrite": "Replace an existing file with the same name",
+          "repository_source": "Read the repository from a pull request"
+        },
+        "data_description": {
+          "overwrite": "Enable only when you intend to replace a custom profile with the same filename.",
+          "repository_source": "Leave empty to use the published repository. Enter a pull request number or URL to use the products generated for its latest commit. The selection remains active until this field is cleared."
+        }
+      },
+      "connection_mode": {
+        "title": "Select connection",
+        "description": "Choose how you want ESP-Weaver to connect to your device.\n\n• **Local control**: Find devices connected to the same network as Home Assistant\n• **Cloud control**: Connect through ESP RainMaker",
+        "data": {
+          "connection_mode": "Connection mode"
+        }
+      },
+      "rainmaker_login": {
+        "title": "Sign in to RainMaker",
+        "description": "Sign in to your ESP RainMaker account to view and add its devices.",
+        "data": {
+          "rainmaker_region": "Region",
+          "email": "Email",
+          "password": "Password"
+        },
+        "data_description": {
+          "rainmaker_region": "The RainMaker region where the devices are registered."
+        }
+      },
+      "cloud_action_select": {
+        "title": "Choose an action",
+        "description": "Choose whether to add a device already in your account or set up a new device over Bluetooth.",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "ble_scan": {
+        "title": "Enter provisioning service name",
+        "description": "Power on your device, then enter the provisioning service name shown in its serial log, for example `PROV_724d86`.",
+        "data": {
+          "device_name": "Provisioning service name"
+        }
+      },
+      "wifi_config": {
+        "title": "Configure Wi-Fi",
+        "description": "Enter the Wi-Fi details that **{device_name}** should use.",
+        "data": {
+          "wifi_ssid": "Wi-Fi SSID",
+          "wifi_password": "Wi-Fi password",
+          "device_pop": "PoP (Proof of Possession credential, optional)"
+        },
+        "data_description": {
+          "device_pop": "The PoP provided with the device, if required."
+        }
+      },
+      "provisioning_failed": {
+        "title": "Device setup did not finish",
+        "description": "The device could not be added: {error}\n\nTry again, or go back to check the Wi-Fi settings.",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "cloud_device_select": {
+        "title": "Select cloud device",
+        "description": "Devices available in your ESP RainMaker account: {device_count}\n\nSelect the device you want to add.",
+        "data": {
+          "selected_device": "Device"
+        }
+      },
+      "pop_input": {
+        "title": "Enter Proof of Possession (PoP)",
+        "description": "You can find the PoP on the device's **Node Info** page in the ESP RainMaker app. Enter it here.",
+        "data": {
+          "custom_pop": "PoP",
+          "action": "Action"
+        }
+      },
+      "device_setup": {
+        "title": "Select device",
+        "description": "{matched}{silent_note}",
+        "data": {
+          "selected_device": "Device",
+          "action": "Action"
+        }
+      },
+      "profile_vendor": {
+        "title": "Select manufacturer",
+        "description": "{result}{repository}",
+        "data": {
+          "vendor": "Manufacturer",
+          "action": "Action"
+        }
+      },
+      "profile_select": {
+        "title": "Select {vendor} product",
+        "description": "Select the product that matches your device. Type a name or model to filter the list.",
+        "data": {
+          "profile": "Product",
+          "action": "Action"
+        }
+      },
+      "device_mismatch": {
+        "title": "Product does not match",
+        "description": "Selected product: **{product}**\n\nDevice model: **{reported_model}**\n\n{reason}\n\nThe device has not been added. Select **Submit** to choose another product while keeping the device connected, or close the dialog to cancel."
+      }
+    },
+    "progress": {
+      "provisioning": "Setting up **{device_name}**… Wi-Fi credentials are being sent over Bluetooth. This can take a few minutes."
+    },
+    "error": {
+      "pop_required": "Enter the device PoP.",
+      "invalid_pop": "The PoP is invalid. Check it and try again.",
+      "cannot_connect": "Could not connect to the device. Make sure it is powered on and connected to the same network as Home Assistant.",
+      "invalid_device_selection": "Select a device from the list.",
+      "rainmaker_not_logged_in": "Sign in to RainMaker first.",
+      "rainmaker_login_failed": "Could not sign in to RainMaker. Check your credentials.",
+      "provisioning_failed": "Could not set up the device. Make sure it is in provisioning mode and try again.",
+      "wifi_ssid_required": "Enter the Wi-Fi SSID.",
+      "wifi_password_required": "Wi-Fi password is required. Open networks are not supported.",
+      "profile_import_failed": "The profile was not imported, so nothing was saved: {error}",
+      "import_bad_filename": "`{filename}` is not a valid profile filename. Use a filename ending in .yaml or .yml, without a directory path.",
+      "import_exists": "`{filename}` already exists. Turn on \"Replace an existing file with the same name\" to replace it.",
+      "import_write_failed": "Could not write `{filename}` to the profile directory: {error}",
+      "upload_expired": "The upload is no longer available. Please choose the file again.",
+      "upload_invalid": "The profile `{filename}` failed validation, so nothing was saved: {detail}",
+      "upload_not_text": "The selected file is not UTF-8 text. Save it as UTF-8 and choose it again.",
+      "upload_too_large": "`{filename}` exceeds the {limit} KB profile size limit. Check that you selected the correct file.",
+      "upload_unreadable": "Could not read the file you chose: {error}",
+      "profile_unknown": "Select a product from the list. Typing only filters the list.",
+      "profile_fetch_failed": "The selected product could not be loaded. Check the network connection or select another product.",
+      "vendor_unknown": "Select a manufacturer from the list. Typing only filters the list.",
+      "provisioning_not_in_cloud": "The device connected to Wi-Fi but has not appeared in your ESP RainMaker account yet. Wait a moment and try again.",
+      "provisioning_ambiguous": "Several devices joined your account during setup ({error}), so the new device could not be identified. No device was added. Select it from the cloud device list instead.",
+      "repository_source_invalid": "Enter a pull request number such as `123`, or the URL of its GitHub page.",
+      "repository_source_unreachable": "`{source}` could not be read from GitHub: {error}"
+    },
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "no_devices_found": "No devices were found. Make sure your device is powered on and connected to the same network as Home Assistant, then try again.",
+      "security_unknown": "**{device_name}** did not respond during connection setup, so it was not added. Wait for the device to finish starting and try again.",
+      "node_unread": "The device connected but did not provide the information needed to add it. Make sure the device is online and try again.",
+      "no_new_devices_found": "All discovered devices have already been added.",
+      "no_fitting_devices": "Devices found but not yet added: {found}. None match **{product}**. Check the selected product, then make sure your device is powered on and connected to the same network as Home Assistant.",
+      "summary_failed": "The selected product could not be used with this device, so the device was not added. Select another product and try again. If the problem continues, check the logs and report the issue."
+    }
+  },
+  "selector": {
+    "connection_mode": {
+      "options": {
+        "local": "Local control",
+        "cloud": "Cloud control (ESP RainMaker)"
+      }
+    },
+    "cloud_action": {
+      "options": {
+        "existing": "Add existing device",
+        "provision": "Provision new device over Bluetooth"
+      }
+    },
+    "provisioning_action": {
+      "options": {
+        "retry": "Retry",
+        "back": "Back to Wi-Fi settings"
+      }
+    },
+    "rainmaker_region": {
+      "options": {
+        "global": "Global (api.rainmaker.espressif.com)"
+      }
+    },
+    "nav_action": {
+      "options": {
+        "next": "Next",
+        "back": "Previous"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Change product",
+        "description": "Current product: **{current}**\n\nSelect the manufacturer of the new product. Changing the product recreates its entities; entities that can be reused retain their history.{repository}",
+        "data": {
+          "vendor": "Manufacturer"
+        }
+      },
+      "profile_select": {
+        "title": "Select {vendor} product",
+        "description": "Current product: **{current}**\n\nSelect the new product. Type to filter; the source is shown only when needed.",
+        "data": {
+          "profile": "Product",
+          "action": "Action"
+        }
+      },
+      "device_mismatch": {
+        "title": "Product does not match",
+        "description": "Selected product: **{product}**\n\nDevice model: **{reported_model}**\n\n{reason}\n\nThe product was not changed. Select **Submit** to choose another product, or close the dialog to keep the current product."
+      }
+    },
+    "error": {
+      "profile_unknown": "Select a product from the list. Typing only filters the list.",
+      "profile_fetch_failed": "The selected product could not be loaded. Check the network connection or select another product.",
+      "vendor_unknown": "Select a manufacturer from the list. Typing only filters the list."
+    },
+    "abort": {
+      "node_unread": "The device has not provided the information needed to change its product. Make sure the device is online and try again.",
+      "summary_failed": "The selected product could not be used with this device, so nothing was changed. Select another product and try again. If the problem continues, check the logs and report the issue."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery_energy": {
+        "name": "Battery",
+        "state_attributes": {
+          "battery_level": {
+            "name": "Battery Level"
+          },
+          "voltage": {
+            "name": "Voltage"
+          },
+          "temperature": {
+            "name": "Temperature"
+          },
+          "charging_status": {
+            "name": "Charging Status"
+          },
+          "alert_level": {
+            "name": "Alert Level"
+          }
+        }
+      },
+      "imu_gesture": {
+        "name": "IMU Gesture",
+        "state": {
+          "idle": "Idle",
+          "tap": "Tap",
+          "double_tap": "Double Tap",
+          "shake": "Shake",
+          "tilt_left": "Tilt Left",
+          "tilt_right": "Tilt Right",
+          "tilt_up": "Tilt Up",
+          "tilt_down": "Tilt Down",
+          "flip": "Flip",
+          "rotate_cw": "Rotate Clockwise",
+          "rotate_ccw": "Rotate Counterclockwise"
+        },
+        "state_attributes": {
+          "gesture": {
+            "name": "Gesture"
+          },
+          "confidence": {
+            "name": "Confidence"
+          },
+          "power": {
+            "name": "Power"
+          },
+          "sensitivity": {
+            "name": "Sensitivity"
+          },
+          "orientation_x": {
+            "name": "Orientation X"
+          },
+          "orientation_y": {
+            "name": "Orientation Y"
+          },
+          "orientation_z": {
+            "name": "Orientation Z"
+          }
+        }
+      },
+      "interactive_input": {
+        "name": "Interactive Input",
+        "state": {
+          "none": "None",
+          "click": "Click",
+          "double_click": "Double Click",
+          "long_press": "Long Press",
+          "angle": "Angle",
+          "increment": "Increment",
+          "speed": "Speed",
+          "tap": "Tap",
+          "double_tap": "Double Tap",
+          "swipe": "Swipe"
+        },
+        "state_attributes": {
+          "input_type": {
+            "name": "Input Type"
+          },
+          "input_events": {
+            "name": "Input Events"
+          },
+          "input_value": {
+            "name": "Input Value"
+          },
+          "sensitivity": {
+            "name": "Sensitivity"
+          }
+        }
+      },
+      "low_power_sleep": {
+        "name": "Low Power Sleep",
+        "state": {
+          "awake": "Awake",
+          "light_sleep": "Light Sleep",
+          "deep_sleep": "Deep Sleep",
+          "hibernation": "Hibernation"
+        },
+        "state_attributes": {
+          "wake_reason": {
+            "name": "Wake Reason"
+          },
+          "wake_window_status": {
+            "name": "Wake Window Status"
+          },
+          "sleep_duration": {
+            "name": "Sleep Duration"
+          },
+          "wake_count": {
+            "name": "Wake Count"
+          }
+        }
+      },
+      "temperature": {
+        "name": "Temperature"
+      },
+      "humidity": {
+        "name": "Humidity"
+      },
+      "pressure": {
+        "name": "Pressure"
+      },
+      "ambient_temperature": {
+        "name": "Ambient Temperature"
+      },
+      "illuminance": {
+        "name": "Illuminance"
+      },
+      "ambient_humidity": {
+        "name": "Ambient Humidity"
+      },
+      "co2": {
+        "name": "CO2"
+      },
+      "voc": {
+        "name": "VOC"
+      },
+      "pm25": {
+        "name": "PM2.5"
+      },
+      "run_cycle": {
+        "name": "Run Cycle"
+      }
+    },
+    "binary_sensor": {
+      "binary_sensor": {
+        "name": "Binary Sensor",
+        "state_attributes": {
+          "binary_sensor_type": {
+            "name": "Sensor Type"
+          },
+          "debounce_time": {
+            "name": "Debounce Time"
+          },
+          "report_interval": {
+            "name": "Report Interval"
+          }
+        }
+      },
+      "connectivity": {
+        "name": "Connectivity"
+      }
+    },
+    "light": {
+      "light": {
+        "name": "Light",
+        "state_attributes": {
+          "intensity": {
+            "name": "Intensity"
+          },
+          "light_mode": {
+            "name": "Light Mode"
+          },
+          "color_temp_percent": {
+            "name": "Color Temperature Percent"
+          }
+        }
+      },
+      "lightbulb": {
+        "name": "Lightbulb"
+      }
+    },
+    "number": {
+      "temperature_min_threshold": {
+        "name": "Temperature Min Threshold"
+      },
+      "temperature_max_threshold": {
+        "name": "Temperature Max Threshold"
+      },
+      "humidity_min_threshold": {
+        "name": "Humidity Min Threshold"
+      },
+      "humidity_max_threshold": {
+        "name": "Humidity Max Threshold"
+      },
+      "pressure_min_threshold": {
+        "name": "Pressure Min Threshold"
+      },
+      "pressure_max_threshold": {
+        "name": "Pressure Max Threshold"
+      },
+      "illuminance_min_threshold": {
+        "name": "Illuminance Min Threshold"
+      },
+      "illuminance_max_threshold": {
+        "name": "Illuminance Max Threshold"
+      },
+      "co2_min_threshold": {
+        "name": "CO2 Min Threshold"
+      },
+      "co2_max_threshold": {
+        "name": "CO2 Max Threshold"
+      },
+      "voc_min_threshold": {
+        "name": "VOC Min Threshold"
+      },
+      "voc_max_threshold": {
+        "name": "VOC Max Threshold"
+      },
+      "pm25_min_threshold": {
+        "name": "PM2.5 Min Threshold"
+      },
+      "pm25_max_threshold": {
+        "name": "PM2.5 Max Threshold"
+      },
+      "debounce_time": {
+        "name": "Debounce Time"
+      },
+      "gesture_sensitivity": {
+        "name": "Gesture Sensitivity"
+      },
+      "input_sensitivity": {
+        "name": "Input Sensitivity"
+      },
+      "report_interval": {
+        "name": "Report Interval"
+      },
+      "update_interval": {
+        "name": "Update Interval"
+      }
+    },
+    "alarm_control_panel": {
+      "alarm_panel": {
+        "name": "Security Panel"
+      }
+    },
+    "button": {
+      "factory_reset": {
+        "name": "Factory Reset"
+      },
+      "reboot": {
+        "name": "Reboot"
+      },
+      "wifi_reset": {
+        "name": "Wi-Fi Reset"
+      }
+    },
+    "climate": {
+      "air_conditioner": {
+        "name": "Air Conditioner"
+      },
+      "thermostat": {
+        "name": "Thermostat"
+      }
+    },
+    "cover": {
+      "external_blinds": {
+        "name": "External Blinds"
+      },
+      "garage_door": {
+        "name": "Garage Door"
+      },
+      "internal_blinds": {
+        "name": "Internal Blinds"
+      }
+    },
+    "event": {
+      "event": {
+        "name": "Event"
+      }
+    },
+    "fan": {
+      "fan": {
+        "name": "Fan"
+      }
+    },
+    "humidifier": {
+      "humidifier": {
+        "name": "Humidifier"
+      }
+    },
+    "lawn_mower": {
+      "lawn_mower": {
+        "name": "Lawn Mower"
+      }
+    },
+    "lock": {
+      "garage_door_lock": {
+        "name": "Garage Door Lock"
+      },
+      "lock": {
+        "name": "Lock"
+      }
+    },
+    "media_player": {
+      "speaker": {
+        "name": "Speaker"
+      },
+      "tv": {
+        "name": "TV"
+      }
+    },
+    "remote": {
+      "remote": {
+        "name": "Remote"
+      }
+    },
+    "select": {
+      "mode": {
+        "name": "Mode"
+      }
+    },
+    "siren": {
+      "siren": {
+        "name": "Siren"
+      }
+    },
+    "switch": {
+      "add_zigbee_device": {
+        "name": "Add Zigbee Device"
+      },
+      "outlet": {
+        "name": "Outlet"
+      },
+      "paused": {
+        "name": "Paused"
+      },
+      "plug": {
+        "name": "Plug"
+      },
+      "running": {
+        "name": "Running"
+      },
+      "socket": {
+        "name": "Socket"
+      },
+      "switch": {
+        "name": "Switch"
+      },
+      "threshold_alarm_enabled": {
+        "name": "Threshold Alarm"
+      }
+    },
+    "text": {
+      "timezone": {
+        "name": "Timezone"
+      },
+      "timezone_posix": {
+        "name": "Timezone (POSIX)"
+      }
+    },
+    "vacuum": {
+      "vacuum": {
+        "name": "Vacuum"
+      }
+    },
+    "valve": {
+      "valve": {
+        "name": "Valve"
+      }
+    },
+    "water_heater": {
+      "water_heater": {
+        "name": "Water Heater"
+      }
+    }
+  },
+  "issues": {
+    "profile_invalid": {
+      "title": "Device profile {filename} is invalid",
+      "description": "ESP-Weaver could not load the profile `{filename}` from `{directory}`, so it is excluded from the product list. Devices already using a stored copy are not affected.\n\nValidation error:\n\n```\n{detail}\n```\n\nCorrect the profile, then run the `esp_weaver.reload` action or reload the integration."
+    },
+    "profile_misplaced": {
+      "title": "Device profile {filename} will be removed by an update",
+      "description": "The profile `{filename}` is stored in `{directory}`, which is replaced when ESP-Weaver is updated.\n\nMove the profile to `{custom_dir}` in your Home Assistant configuration directory, then run the `esp_weaver.reload` action. Profiles in that directory are preserved during updates."
+    },
+    "profile_update": {
+      "title": "Product update available for {label}",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Update {product}",
+            "description": "Affected devices: {count}. Current and updated entity counts:\n\n| Device | Current | Updated |\n|---|---|---|\n{rows}\n\nUpdating recreates the entities for all listed devices. Entities that can be reused retain their history. To update only one device, open its **Configure** dialog instead."
+          }
+        },
+        "abort": {
+          "profile_update_gone": "The update changed or is no longer available. ESP-Weaver will notify you again if an update is still needed.",
+          "profile_update_fetch_failed": "The product update could not be downloaded. Check Home Assistant's network connection and try again later."
+        }
+      }
+    }
+  },
+  "services": {
+    "reload": {
+      "name": "Reload or import device profiles",
+      "description": "Reloads the local profile directory, online profile catalog, and all ESP-Weaver devices. To import a profile first, provide its URL. A profile that fails validation is not saved.",
+      "fields": {
+        "url": {
+          "name": "URL",
+          "description": "URL of a profile YAML file. Leave empty to reload existing profiles. GitHub file-page and gist URLs are converted to raw URLs automatically."
+        },
+        "filename": {
+          "name": "Filename",
+          "description": "Name to save the download as. Defaults to the filename in the URL."
+        },
+        "overwrite": {
+          "name": "Overwrite",
+          "description": "Replace the file if it already exists."
+        }
+      }
+    }
+  }
+}

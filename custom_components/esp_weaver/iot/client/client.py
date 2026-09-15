@@ -1,11 +1,8 @@
 # SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
 #
 # SPDX-License-Identifier: Apache-2.0
-"""ESP Local Control Client.
 
-This module provides the client implementation for communicating with
-ESP devices using the ESP Local Control protocol.
-"""
+"""One connection to one ESP device, over the ESP Local Control protocol."""
 
 import asyncio
 from collections.abc import Callable
@@ -14,14 +11,15 @@ import logging
 import socket
 from typing import TYPE_CHECKING, Any
 
+from cryptography.exceptions import InvalidTag
+from google.protobuf.message import DecodeError
+
 from ..local_ctrl import local_ctrl, local_ctrl_codec
+from ..local_ctrl.const import QUERY_TIMEOUT
 from ..specs.device_specs import (
-    CONFIG_PROPERTY_INDEX,
     DEFAULT_PORT,
     DEFAULT_SECURITY_MODE,
-    PARAMS_PROPERTY_INDEX,
     PROPERTY_SET_TIMEOUT,
-    QUERY_TIMEOUT,
     SESSION_CLEANUP_DELAY,
     TCP_KEEPCNT,
     TCP_KEEPIDLE,
@@ -38,7 +36,6 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-HTTPMessageListener = local_ctrl.HTTPMessageListener
 MessageSource = local_ctrl.MessageSource
 
 
@@ -54,15 +51,10 @@ class ESPLocalCtrlClient:
         pop: str | None = None,
         security_mode: int = DEFAULT_SECURITY_MODE,
     ) -> None:
-        """Initialize client with ESP device information.
+        """Initialize a client for one device, with the credentials it expects.
 
-        Args:
-            node_id: Unique identifier for the ESP device.
-            ip: IP address of the ESP device.
-            port: Port number for ESP Local Control. Defaults to 8080.
-            pop: Proof of Possession (security credentials). Optional.
-            security_mode: Security mode (0=no security, 1=with security).
-                Defaults to 1.
+        `security_mode` is what the device reported: 0 for none, 1 for a PoP,
+        2 for SRP6a. `pop` is unused at 0 and required otherwise.
         """
         self.node_id = node_id
         self.ip = ip
@@ -79,14 +71,13 @@ class ESPLocalCtrlClient:
 
         self._connection_error: bool = False
         self._connection_error_callback: Callable[[str], None] | None = None
-        self._http_listener: HTTPMessageListener | None = None
+        self._http_listener: local_ctrl.HTTPMessageListener | None = None
         self._message_callbacks: list[Callable] = []
 
     async def connect(self) -> bool:
         """Establish connection to ESP device."""
         async with self._connect_lock:
             try:
-                # Check if already connected
                 if await self.is_connected():
                     _LOGGER.debug(
                         "Device %s already connected, reusing connection",
@@ -100,82 +91,11 @@ class ESPLocalCtrlClient:
                     self.ip,
                     self.port,
                 )
+                return await self._open_session()
 
-                # Clean up any stale session state before reconnecting
-                await self._cleanup_session()
-
-                # Create transport
-                service_name = f"{self.ip}:{self.port}"
-                self.transport = await local_ctrl.get_transport(
-                    sel_transport="http", service_name=service_name
-                )
-
-                if not self.transport:
-                    _LOGGER.error("Failed to create transport for %s", service_name)
-                    return False
-
-                # For both sec1 and sec2, detect the device's protocomm patch
-                # version (unencrypted /version endpoint) so our crypto matches
-                # the firmware. sec1: patch_ver 0 = shared TX/RX AES-CTR keystream
-                # (stock, e.g. RainMaker), 1 = separate (esp_weaver). sec2 uses
-                # it to select the AES-GCM IV variant.
-                sec_patch_ver = 0
-                if self.security_mode >= 1:
-                    detected = await local_ctrl.get_sec_patch_ver(self.transport)
-                    sec_patch_ver = detected if detected is not None else 0
-                    _LOGGER.debug(
-                        "Device %s reports sec_ver=%s sec_patch_ver=%s",
-                        self.node_id,
-                        self.security_mode,
-                        sec_patch_ver,
-                    )
-
-                # Called for all modes. sec2 (SRP6a) needs RainMaker's fixed
-                # username "wifiprov" with the PoP as password; sec0/sec1 use
-                # `pop` directly (username/password empty).
-                self.security_ctx = local_ctrl.get_security(
-                    secver=self.security_mode,
-                    sec_patch_ver=sec_patch_ver,
-                    username="wifiprov" if self.security_mode == 2 else "",
-                    password=(self.pop or "") if self.security_mode == 2 else "",
-                    pop=self.pop or "",
-                )
-
-                if not self.security_ctx:
-                    _LOGGER.error("Failed to create security context")
-                    return False
-
-                # Establish session with device
-                established = await local_ctrl.establish_session(
-                    self.transport, self.security_ctx
-                )
-                if not established:
-                    _LOGGER.error("Failed to establish session with device")
-                    return False
-
-                # Reset connection state after handshake
-                if hasattr(self.transport, "reset_connection"):
-                    self.transport.reset_connection()
-
-                self.session_established = True
-
-                # Clear connection error flag on successful connect
-                self._connection_error = False
-
-                # Enable TCP keepalive for automatic connection monitoring
-                await self._enable_tcp_keepalive()
-
-                # Start HTTP message listener with callbacks already in place
-                await self._start_message_listener()
-
-                _LOGGER.info(
-                    "Successfully established connection to device %s at %s:%s",
-                    self.node_id,
-                    self.ip,
-                    self.port,
-                )
-
-            except (OSError, TimeoutError, ConnectionError, RuntimeError) as err:
+            # Malformed key (ValueError), bad frame (DecodeError), wrong PoP
+            # (InvalidTag): connect() reports failure rather than raising.
+            except (OSError, RuntimeError, ValueError, DecodeError, InvalidTag) as err:
                 _LOGGER.warning(
                     "Connection failed for device %s at %s:%s: %s",
                     self.node_id,
@@ -186,20 +106,72 @@ class ESPLocalCtrlClient:
                 await self.disconnect()
                 return False
 
+    async def _open_session(self) -> bool:
+        """Build a transport, handshake over it, and start listening on it.
+
+        Returns:
+            True once the device is ready to be asked for its properties.
+        """
+        # Clean up any stale session state before reconnecting
+        await self._cleanup_session()
+
+        service_name = f"{self.ip}:{self.port}"
+        self.transport = await local_ctrl.get_transport(
+            sel_transport="http", service_name=service_name
+        )
+        if not self.transport:
+            _LOGGER.error("Failed to create transport for %s", service_name)
+            return False
+
+        self.security_ctx = await local_ctrl.build_security(
+            self.transport, self.security_mode, self.pop or ""
+        )
+        if not self.security_ctx:
+            _LOGGER.error("Failed to create security context")
+            return False
+
+        if not await local_ctrl.establish_session(self.transport, self.security_ctx):
+            _LOGGER.error("Failed to establish session with device")
+            return False
+
+        # Reset connection state after handshake
+        self.transport.reset_connection()
+
+        self.session_established = True
+        self._connection_error = False
+
+        # Keepalive watches the connection; the listener is started with the
+        # callbacks already in place so no report can arrive unheard.
+        await self._enable_tcp_keepalive()
+        await self._start_message_listener()
+
+        _LOGGER.info(
+            "Successfully established connection to device %s at %s:%s",
+            self.node_id,
+            self.ip,
+            self.port,
+        )
         return True
+
+    @property
+    def has_session(self) -> bool:
+        """Whether a session was established and its transport is still held.
+
+        Bookkeeping only; ``is_connected`` is what asks the socket.
+        """
+        return self.session_established and self.transport is not None
 
     async def is_connected(self) -> bool:
         """Check if connection is valid."""
         if self._connection_error:
             return False
 
-        if not self.transport or not self.session_established:
+        transport = self.transport
+        if transport is None or not self.session_established:
             return False
 
-        # Check socket health (TransportHTTP has is_socket_healthy method)
-        check_health = getattr(self.transport, "is_socket_healthy", lambda: True)
         try:
-            return bool(check_health())
+            return transport.is_socket_healthy()
         except OSError:
             return False
 
@@ -218,137 +190,131 @@ class ESPLocalCtrlClient:
 
         return True
 
-    async def get_property_values(self) -> list[dict[str, Any]]:
-        """Get all property values."""
-        async with self._control_lock:
-            try:
-                # Use unified connection check
-                if not await self._ensure_connected():
-                    return []
+    async def get_property_values(self) -> list[dict[str, Any]] | None:
+        """Read every property the device has.
 
-                props = await self._get_all_property_values_via_listener(
+        Returns:
+            The properties, or None if the device could not be asked; the
+            connection is then marked bad.
+        """
+        async with self._control_lock:
+            if not await self._ensure_connected():
+                return None
+            try:
+                return await self._get_all_property_values_via_listener(
                     timeout=QUERY_TIMEOUT
                 )
-
-                if not props:
-                    _LOGGER.warning("No properties returned from device")
-
-            except (OSError, TimeoutError, ConnectionError) as err:
+            except (OSError, RuntimeError) as err:
+                # RuntimeError is how the transport reports a failed request.
                 _LOGGER.error("Failed to get property values: %s", err)
-                return []
-
-        return props
+                self.mark_connection_error()
+                return None
 
     async def _get_all_property_values_via_listener(
         self, timeout: float = QUERY_TIMEOUT
-    ) -> list[dict[str, Any]]:
-        """Get all property values using HTTPMessageListener."""
-        try:
-            if (
-                not self.transport
-                or not self.session_established
-                or not self._http_listener
-                or not self.security_ctx
-            ):
-                return []
+    ) -> list[dict[str, Any]] | None:
+        """Ask for the property count, then for every property.
 
-            get_count = local_ctrl_codec.get_prop_count_request
-            count_request = get_count(self.security_ctx)
+        Returns:
+            The properties, or None if either query went unanswered; the
+            connection is then marked bad.
+        """
+        if (
+            not self.transport
+            or not self.session_established
+            or not self._http_listener
+            or not self.security_ctx
+        ):
+            return None
 
-            send_wait = self._http_listener.send_query_and_wait
-            result = await send_wait(self.transport, count_request, timeout=timeout)
-            msg_source, count_data = result
+        send_wait = self._http_listener.send_query_and_wait
+        count_request = local_ctrl_codec.get_prop_count_request(self.security_ctx)
+        msg_source, count_data = await send_wait(
+            self.transport, count_request, timeout=timeout
+        )
+        if msg_source != MessageSource.QUERY_RESPONSE:
+            _LOGGER.warning("Device %s did not answer a property query", self.node_id)
+            self.mark_connection_error()
+            return None
 
-            if msg_source != MessageSource.QUERY_RESPONSE:
-                return []
-
-            prop_count = parse_property_count_response(count_data)
-
-            if prop_count <= 0:
-                return []
-
-            indices = list(range(prop_count))
-            get_vals = local_ctrl_codec.get_prop_vals_request
-            props_request = get_vals(self.security_ctx, indices)
-
-            result = await send_wait(self.transport, props_request, timeout=timeout)
-            msg_source, props_data = result
-
-            if msg_source != MessageSource.QUERY_RESPONSE:
-                return []
-
-            return parse_property_values_response(props_data)
-
-        except (OSError, TimeoutError, ConnectionError) as err:
-            _LOGGER.error("Failed to get property values via listener: %s", err)
+        prop_count = parse_property_count_response(count_data)
+        if prop_count <= 0:
             return []
 
+        props_request = local_ctrl_codec.get_prop_vals_request(
+            self.security_ctx, list(range(prop_count))
+        )
+        msg_source, props_data = await send_wait(
+            self.transport, props_request, timeout=timeout
+        )
+        if msg_source != MessageSource.QUERY_RESPONSE:
+            _LOGGER.warning("Device %s did not answer a property query", self.node_id)
+            self.mark_connection_error()
+            return None
+
+        return parse_property_values_response(props_data)
+
     async def set_property_values(self, indices: list[int], values: list[Any]) -> bool:
-        """Set property values."""
+        """Write property values.
+
+        Returns:
+            True if the device accepted. False if it refused, or if it could
+            not be asked; the connection is then marked bad.
+        """
         async with self._control_lock:
+            if self._connection_error:
+                return False
+
+            if not self.transport or not self.session_established:
+                return False
+
+            esp_values = convert_values_to_esp_format(values)
+
             try:
-                if self._connection_error:
-                    return False
-
-                if not self.transport or not self.session_established:
-                    return False
-
-                esp_values = convert_values_to_esp_format(values)
-
-                if indices and indices[0] == CONFIG_PROPERTY_INDEX:
-                    indices = [PARAMS_PROPERTY_INDEX, *indices[1:]]
-
-                try:
-                    result = await asyncio.wait_for(
-                        local_ctrl.set_property_values(
-                            self.transport,
-                            self.security_ctx,
-                            props=None,
-                            indices=indices,
-                            values=esp_values,
-                            check_readonly=False,
-                            listener=self._http_listener,
-                        ),
-                        timeout=PROPERTY_SET_TIMEOUT,
-                    )
-                except TimeoutError:
-                    _LOGGER.warning(
-                        "Property setting timed out for device %s",
-                        self.node_id,
-                    )
-                    self.mark_connection_error()
-                    return False
-
-                success: bool = bool(result)
-                if not success:
-                    _LOGGER.warning("Device rejected property setting request")
-                return success  # noqa: TRY300
-
-            except (OSError, ConnectionError, BrokenPipeError) as err:
+                # local_ctrl is the vendored protocol library and is excluded
+                # from type checking; see pyproject.toml.
+                result = await local_ctrl.set_property_values(  # type: ignore[no-untyped-call]
+                    self.transport,
+                    self.security_ctx,
+                    indices=indices,
+                    values=esp_values,
+                    listener=self._http_listener,
+                    timeout=PROPERTY_SET_TIMEOUT,
+                )
+            except (OSError, RuntimeError) as err:
                 _LOGGER.error("Failed to set property values: %s", err)
                 self.mark_connection_error()
                 return False
+
+            # No answer within the timeout: the session is not to be trusted.
+            if result is None:
+                _LOGGER.warning(
+                    "Property setting timed out for device %s", self.node_id
+                )
+                self.mark_connection_error()
+                return False
+
+            if not result:
+                _LOGGER.warning("Device rejected property setting request")
+            return bool(result)
 
     async def disconnect(self) -> None:
         """Disconnect from ESP device."""
         _LOGGER.debug("Disconnecting from device %s", self.node_id)
         self._connection_error = True
         await self._cleanup_session()
-        _LOGGER.info("Disconnected from device %s", self.node_id)
+        _LOGGER.debug("Disconnected from device %s", self.node_id)
 
     async def _cleanup_session(self) -> None:
         """Clean up session resources."""
         await self._stop_message_listener()
 
         if self.transport:
-            # Close HTTP connection and send FIN packet
-            # Suppress all errors during cleanup - connection may already be closed
-            with contextlib.suppress(Exception):
-                if hasattr(self.transport, "close"):
-                    self.transport.close()
-                elif hasattr(self.transport, "conn"):
-                    self.transport.conn.close()
-                await asyncio.sleep(SESSION_CLEANUP_DELAY)
+            # The connection may already be gone; closing it a second time is
+            # not an error worth hearing about during teardown.
+            with contextlib.suppress(OSError, RuntimeError):
+                self.transport.close()
+            await asyncio.sleep(SESSION_CLEANUP_DELAY)
 
             self.transport = None
 
@@ -358,14 +324,12 @@ class ESPLocalCtrlClient:
     async def _enable_tcp_keepalive(self) -> None:
         """Enable TCP keepalive for connection monitoring."""
         try:
-            if not self.transport or not hasattr(self.transport, "conn"):
+            if not self.transport:
                 return
 
-            conn = self.transport.conn
-            if not conn or not hasattr(conn, "sock") or conn.sock is None:
+            sock = self.transport.socket()
+            if sock is None:
                 return
-
-            sock = conn.sock
 
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 
@@ -389,8 +353,8 @@ class ESPLocalCtrlClient:
                 return
 
             # Create and start listener
-            self._http_listener = HTTPMessageListener(
-                self.transport, self.security_ctx, client=self, verbose=False
+            self._http_listener = local_ctrl.HTTPMessageListener(
+                self.transport, self.security_ctx, client=self
             )
 
             for callback in self._message_callbacks:

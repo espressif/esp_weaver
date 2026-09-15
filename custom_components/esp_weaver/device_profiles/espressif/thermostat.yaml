@@ -1,0 +1,53 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: thermostat
+product_label: "Thermostat"
+product_labels:
+  zh-Hans: "恒温器"
+model: "*"
+
+devices:
+  # Setpoint Temperature is required, while Power is optional because some
+  # thermostats represent their operating state with AC Mode alone. Without
+  # Power, Home Assistant derives the climate state directly from AC Mode.
+  - type: esp.device.thermostat
+    entities:
+      - platform: climate
+        name: "Thermostat"
+        key: thermostat
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+            optional: true
+          hvac_mode:
+            param: "AC Mode"
+            type: esp.param.ac-mode
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+            # This map converts RainMaker mode names to Home Assistant's fixed
+            # HVAC modes. "Off" is quoted so YAML does not parse it as false.
+            map: { "Off": "off", Cool: cool, Heat: heat, Auto: auto, Dry: dry, Fan: fan_only }
+          current_temperature:
+            param: "Temperature"
+            type: esp.param.temperature
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+            optional: true
+          target_temperature:
+            param: "Setpoint Temperature"
+            type: esp.param.setpoint-temperature
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            # Models support different setpoint ranges, so Home Assistant uses
+            # the bounds reported by the firmware.

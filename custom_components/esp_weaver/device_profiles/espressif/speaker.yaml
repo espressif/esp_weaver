@@ -1,0 +1,68 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: speaker
+product_label: "Speaker"
+product_labels:
+  zh-Hans: "扬声器"
+model: "*"
+
+devices:
+  # RainMaker defines the speaker device type but no media parameter macros.
+  # Their names and types follow the official RainMaker documentation.
+  - type: esp.device.speaker
+    entities:
+      - platform: media_player
+        name: "Speaker"
+        key: speaker
+        device_class: speaker
+        # RainMaker provides no device constructor for this type, so applications
+        # add the parameters themselves. Only Power is required, allowing models
+        # with fewer media features to create an entity.
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+          volume:
+            param: "Volume"
+            type: esp.param.volume
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            optional: true
+            bounds: { min: 0, max: 20, step: 1 }
+            # RainMaker uses a 0–20 volume range, while Home Assistant uses 0–1.
+            scale: { to: [0, 1] }
+          mute:
+            param: "Mute"
+            type: esp.param.mute
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+            optional: true
+          # When Power is off, Home Assistant reports off. Otherwise, it uses
+          # the mapped playback state, or on when no playback state is available.
+          media_state:
+            param: "Media State"
+            type: esp.param.media-activity-state
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+            map: { Playing: playing, Paused: paused, Stopped: idle, Idle: idle, Buffering: buffering }
+          # This parameter is a write-only command channel for Home Assistant
+          # transport services. Writes apply the map in reverse to send the
+          # corresponding RainMaker command.
+          media_control:
+            param: "Media Control"
+            type: esp.param.media-activity-control
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+            map: { Play: play, Pause: pause, Stop: stop, Next: next, Previous: previous }

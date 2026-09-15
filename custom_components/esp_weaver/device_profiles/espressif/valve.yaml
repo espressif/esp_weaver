@@ -1,0 +1,26 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: valve
+product_label: "Valve"
+product_labels:
+  zh-Hans: "阀门"
+model: "*"
+
+devices:
+  - type: esp.device.valve
+    entities:
+      - platform: valve
+        name: "Valve"
+        key: valve
+        device_class: water
+        attributes:
+          position:
+            param: "Valve Position"
+            type: esp.param.range
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 0, max: 100, step: 1 }

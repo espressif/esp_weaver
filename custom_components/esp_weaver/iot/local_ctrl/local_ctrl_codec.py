@@ -10,6 +10,9 @@ property count, property values, and set property operations.
 import logging
 from typing import TYPE_CHECKING
 
+from cryptography.exceptions import InvalidTag
+from google.protobuf.message import DecodeError
+
 from .protocol import local_ctrl_pb2
 
 if TYPE_CHECKING:
@@ -35,18 +38,6 @@ def get_prop_count_request(security_ctx: "Security") -> str:
     return enc_cmd.decode("latin-1")
 
 
-def get_prop_count_response(
-    security_ctx: "Security", response_data: str | bytes
-) -> int:
-    """Parse encrypted response for property count."""
-    decrypt = security_ctx.decrypt_data(to_bytes(response_data))
-    resp = local_ctrl_pb2.LocalCtrlMessage()
-    resp.ParseFromString(decrypt)
-    if resp.resp_get_prop_count.status == 0:
-        return resp.resp_get_prop_count.count
-    return 0
-
-
 def get_prop_vals_request(
     security_ctx: "Security", indices: list[int]
 ) -> str:
@@ -58,27 +49,6 @@ def get_prop_vals_request(
     req.cmd_get_prop_vals.MergeFrom(payload)
     enc_cmd = security_ctx.encrypt_data(req.SerializeToString())
     return enc_cmd.decode("latin-1")
-
-
-def get_prop_vals_response(
-    security_ctx: "Security", response_data: str | bytes
-) -> list[dict[str, str | int | bytes]]:
-    """Parse encrypted response for property values."""
-    decrypt = security_ctx.decrypt_data(to_bytes(response_data))
-    resp = local_ctrl_pb2.LocalCtrlMessage()
-    resp.ParseFromString(decrypt)
-    results: list[dict[str, str | int | bytes]] = []
-    if resp.resp_get_prop_vals.status == 0:
-        for prop in resp.resp_get_prop_vals.props:
-            results.append(
-                {
-                    "name": prop.name,
-                    "type": prop.type,
-                    "flags": prop.flags,
-                    "value": prop.value,
-                }
-            )
-    return results
 
 
 def set_prop_vals_request(
@@ -97,26 +67,14 @@ def set_prop_vals_request(
     return enc_cmd.decode("latin-1")
 
 
-def set_prop_vals_response(
-    security_ctx: "Security", response_data: str | bytes
-) -> bool:
-    """Parse encrypted response for set property values."""
-    decrypt = security_ctx.decrypt_data(to_bytes(response_data))
-    resp = local_ctrl_pb2.LocalCtrlMessage()
-    resp.ParseFromString(decrypt)
-    return resp.resp_set_prop_vals.status == 0
-
-
 def parse_payload(msg_type_str, security_ctx, payload_data):
-    """Parse protobuf payload from HTTP message.
+    """Decrypt one message from the device into a status and its properties.
 
-    Args:
-        msg_type_str: Message type string (active_report or query_response).
-        security_ctx: Security context for decryption.
-        payload_data: Encrypted payload data.
-
-    Returns:
-        Dictionary with status and parsed properties.
+    The message body is a oneof, so which field is set is what says whether the
+    device is answering a count, a read, a write, or reporting on its own. A
+    write in particular answers with nothing but a status, and the status has
+    to be read: reporting the write as accepted when the device refused it
+    leaves the entity showing a state the device is not in.
     """
     try:
         decrypt_data = security_ctx.decrypt_data(to_bytes(payload_data))
@@ -124,12 +82,11 @@ def parse_payload(msg_type_str, security_ctx, payload_data):
         resp.ParseFromString(decrypt_data)
 
         if resp.HasField("resp_get_prop_count"):
-            if resp.resp_get_prop_vals and len(resp.resp_get_prop_vals.props) == 0:
-                return {
-                    "status": 0,
-                    "count": resp.resp_get_prop_count.count,
-                    "properties": [],
-                }
+            return {
+                "status": 0,
+                "count": resp.resp_get_prop_count.count,
+                "properties": [],
+            }
 
         results = []
         status = 0
@@ -142,7 +99,9 @@ def parse_payload(msg_type_str, security_ctx, payload_data):
                 status = 0
 
         elif msg_type_str == "query_response":
-            if resp.HasField("resp_get_prop_vals"):
+            if resp.HasField("resp_set_prop_vals"):
+                status = resp.resp_set_prop_vals.status
+            elif resp.HasField("resp_get_prop_vals"):
                 status = resp.resp_get_prop_vals.status
                 if status == 0:
                     for prop in resp.resp_get_prop_vals.props:
@@ -163,7 +122,12 @@ def parse_payload(msg_type_str, security_ctx, payload_data):
 
         return {"status": status, "properties": results}
 
-    except (ValueError, TypeError, AttributeError) as e:
+    # DecodeError (protobuf) and InvalidTag (AES-GCM) derive directly from
+    # Exception, not ValueError; an out-of-step key stream or a corrupted
+    # frame raises one of them. They have to end up on the same status=-1
+    # path as any other bad frame, or the listener that called us dies with
+    # them and the connection goes on looking healthy.
+    except (ValueError, TypeError, AttributeError, DecodeError, InvalidTag) as e:
         _LOGGER.error(
             "Failed to parse protobuf payload: %s (type=%s)", e, msg_type_str
         )
