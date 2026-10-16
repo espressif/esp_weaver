@@ -4,31 +4,35 @@
 
 """Test the ESP-Weaver diagnostics."""
 
+from functools import partial
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 from homeassistant.core import HomeAssistant
+import pytest
 
-from custom_components.esp_weaver.const import (
-    DIAG_API_STATUS,
-    DIAG_COORDINATOR,
-    DIAG_DEVICE,
-    DIAG_ENTRY,
-)
+from custom_components.esp_weaver.const import CONF_CUSTOM_POP
 from custom_components.esp_weaver.diagnostics import (
-    _process_dict_for_redaction,
     _redact_ip_address,
     async_get_config_entry_diagnostics,
     async_get_device_diagnostics,
+    redact,
 )
-from custom_components.esp_weaver.iot.specs.keys import CONF_CUSTOM_POP
+from custom_components.esp_weaver.profiles.loader import CUSTOM_PROFILE_DIR
 
 from .conftest import (
+    NODE_PRODUCT,
     TEST_DEVICE_NAME,
     TEST_HOST,
     TEST_NODE_ID,
     create_mock_config_entry,
 )
+
+
+@pytest.fixture(autouse=True)
+def _entries_can_set_up(node_product_in_store: None) -> None:
+    """Every entry here is bound to the test node's product; keep its content stored."""
 
 
 class TestIPRedaction:
@@ -81,11 +85,7 @@ class TestDictRedaction:
             "token": "secret_token",
         }
 
-        result = _process_dict_for_redaction(
-            data,
-            to_redact={"pop", "password", "token"},
-            to_partially_redact=set(),
-        )
+        result = redact(data)
 
         assert result["normal_key"] == "value"
         assert result["pop"] == "**REDACTED**"
@@ -99,11 +99,7 @@ class TestDictRedaction:
             "ip": "10.0.0.1",
         }
 
-        result = _process_dict_for_redaction(
-            data,
-            to_redact=set(),
-            to_partially_redact={"host", "ip"},
-        )
+        result = redact(data)
 
         assert "***" in result["host"]
         assert "***" in result["ip"]
@@ -118,11 +114,7 @@ class TestDictRedaction:
             }
         }
 
-        result = _process_dict_for_redaction(
-            data,
-            to_redact={"pop"},
-            to_partially_redact={"host"},
-        )
+        result = redact(data)
 
         assert result["outer"]["pop"] == "**REDACTED**"
         assert "***" in result["outer"]["host"]
@@ -137,11 +129,7 @@ class TestDictRedaction:
             ]
         }
 
-        result = _process_dict_for_redaction(
-            data,
-            to_redact={"pop"},
-            to_partially_redact=set(),
-        )
+        result = redact(data)
 
         assert result["items"][0]["pop"] == "**REDACTED**"
         assert result["items"][1]["pop"] == "**REDACTED**"
@@ -150,11 +138,7 @@ class TestDictRedaction:
         """Test list containing non-dictionary items."""
         data = {"items": ["string", 123, None, {"pop": "secret"}]}
 
-        result = _process_dict_for_redaction(
-            data,
-            to_redact={"pop"},
-            to_partially_redact=set(),
-        )
+        result = redact(data)
 
         # Non-dict items should be preserved
         assert result["items"][0] == "string"
@@ -171,11 +155,7 @@ class TestDictRedaction:
             "normal": None,
         }
 
-        result = _process_dict_for_redaction(
-            data,
-            to_redact={"pop"},
-            to_partially_redact={"host"},
-        )
+        result = redact(data)
 
         # None values with sensitive keys should still be redacted
         assert result["pop"] == "**REDACTED**"
@@ -192,11 +172,7 @@ class TestDictRedaction:
             "pop": "secret",
         }
 
-        result = _process_dict_for_redaction(
-            data,
-            to_redact={"pop"},
-            to_partially_redact=set(),
-        )
+        result = redact(data)
 
         assert result["count"] == 42
         assert result["enabled"] is True
@@ -218,34 +194,33 @@ class TestConfigEntryDiagnostics:
         entry = create_mock_config_entry(mock_config_entry_data)
         entry.runtime_data = mock_coordinator
         mock_coordinator.api = mock_esp_api
-        mock_coordinator.discovery_completed = True
         mock_coordinator.is_available = True
 
         mock_esp_api.devices = {TEST_NODE_ID: {"ip": TEST_HOST}}
         mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
         mock_esp_api.is_discovery_completed = MagicMock(return_value=True)
-        mock_esp_api.get_device_data = AsyncMock(return_value={"test": "data"})
+        mock_esp_api.get_device_data = MagicMock(return_value={"test": "data"})
 
         result = await async_get_config_entry_diagnostics(hass, entry)
 
-        assert DIAG_ENTRY in result
-        assert DIAG_COORDINATOR in result
-        assert DIAG_API_STATUS in result
-        assert result[DIAG_ENTRY]["title"] == TEST_DEVICE_NAME
+        assert "entry" in result
+        assert "coordinator" in result
+        assert "api_status" in result
+        assert result["entry"]["title"] == TEST_DEVICE_NAME
 
         # Verify API status structure
-        assert "device_registered" in result[DIAG_API_STATUS], (
+        assert "device_registered" in result["api_status"], (
             "Expected 'device_registered' key in API status"
         )
-        assert "device_available" in result[DIAG_API_STATUS], (
+        assert "device_available" in result["api_status"], (
             "Expected 'device_available' key in API status"
         )
-        assert "discovery_completed" in result[DIAG_API_STATUS], (
+        assert "discovery_completed" in result["api_status"], (
             "Expected 'discovery_completed' key in API status"
         )
-        assert result[DIAG_API_STATUS]["device_registered"] is True
-        assert result[DIAG_API_STATUS]["device_available"] is True
-        assert result[DIAG_API_STATUS]["discovery_completed"] is True
+        assert result["api_status"]["device_registered"] is True
+        assert result["api_status"]["device_available"] is True
+        assert result["api_status"]["discovery_completed"] is True
 
     async def test_diagnostics_with_pop_redacted(
         self,
@@ -258,18 +233,17 @@ class TestConfigEntryDiagnostics:
         entry = create_mock_config_entry(mock_config_entry_data_with_pop)
         entry.runtime_data = mock_coordinator
         mock_coordinator.api = mock_esp_api
-        mock_coordinator.discovery_completed = True
         mock_coordinator.is_available = True
 
         mock_esp_api.devices = {TEST_NODE_ID: {}}
         mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
         mock_esp_api.is_discovery_completed = MagicMock(return_value=True)
-        mock_esp_api.get_device_data = AsyncMock(return_value={})
+        mock_esp_api.get_device_data = MagicMock(return_value={})
 
         result = await async_get_config_entry_diagnostics(hass, entry)
 
         # PoP should be redacted - unconditional assertion
-        entry_data = result[DIAG_ENTRY]["data"]
+        entry_data = result["entry"]["data"]
         assert CONF_CUSTOM_POP in entry_data, (
             f"Expected {CONF_CUSTOM_POP} key in entry data"
         )
@@ -277,46 +251,96 @@ class TestConfigEntryDiagnostics:
             "Expected PoP to be redacted"
         )
 
-    async def test_diagnostics_without_coordinator(
+
+class TestProfileFilesSection:
+    """Diagnostics say which profile files were read and which were rejected."""
+
+    @pytest.fixture(autouse=True)
+    def _config_dir(self, own_config_dir: Path) -> None:
+        """Write profiles somewhere this test owns, not the shared config."""
+
+    @pytest.fixture
+    def entry(
         self,
-        hass: HomeAssistant,
-        mock_config_entry_data: dict[str, Any],
-    ) -> None:
-        """Test diagnostics when coordinator is not available."""
-        entry = create_mock_config_entry(mock_config_entry_data)
-        entry.runtime_data = None
-
-        result = await async_get_config_entry_diagnostics(hass, entry)
-
-        assert DIAG_ENTRY in result
-        assert DIAG_COORDINATOR in result
-        assert result[DIAG_COORDINATOR]["available"] is False
-
-    async def test_diagnostics_device_data_error(
-        self,
-        hass: HomeAssistant,
         mock_config_entry_data: dict[str, Any],
         mock_coordinator: MagicMock,
         mock_esp_api: MagicMock,
-    ) -> None:
-        """Test diagnostics handles device data fetch error."""
+    ) -> MagicMock:
+        """A loaded entry, since diagnostics are only offered for those."""
         entry = create_mock_config_entry(mock_config_entry_data)
         entry.runtime_data = mock_coordinator
         mock_coordinator.api = mock_esp_api
+        return entry
 
-        mock_esp_api.devices = {TEST_NODE_ID: {}}
-        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
-        mock_esp_api.is_discovery_completed = MagicMock(return_value=True)
-        mock_esp_api.get_device_data = AsyncMock(
-            side_effect=RuntimeError("Connection error")
+    async def test_it_names_the_custom_directory_without_the_household_path(
+        self,
+        hass: HomeAssistant,
+        entry: MagicMock,
+    ) -> None:
+        """Support asking "where do I put my file" gets the folder, not the disk.
+
+        Where the configuration directory lives is the household's business;
+        the folder under it is all a bug report needs.
+        """
+
+        result = await async_get_config_entry_diagnostics(hass, entry)
+
+        section = result["profile_files"]
+        assert section["custom_dir"] == CUSTOM_PROFILE_DIR
+        assert "builtin_dir" not in section
+
+    async def test_it_lists_the_products_on_offer_and_the_binding(
+        self,
+        hass: HomeAssistant,
+        entry: MagicMock,
+    ) -> None:
+        """Which product a device is bound to is the first thing to check."""
+        entry.options = {
+            "profile": {"id": NODE_PRODUCT, "source": "builtin", "hash": "abc"}
+        }
+
+        result = await async_get_config_entry_diagnostics(hass, entry)
+
+        section = result["profile_files"]
+        assert NODE_PRODUCT in [p["id"] for p in section["products"]]
+        assert section["binding"] == {
+            "id": NODE_PRODUCT,
+            "source": "builtin",
+            "hash": "abc",
+        }
+
+    async def test_an_entry_without_a_binding_says_so(
+        self,
+        hass: HomeAssistant,
+        entry: MagicMock,
+    ) -> None:
+        """An entry without a binding has none to report."""
+        entry.options = {}
+
+        result = await async_get_config_entry_diagnostics(hass, entry)
+
+        assert result["profile_files"]["binding"] is None
+
+    async def test_it_carries_the_rejected_files(
+        self,
+        hass: HomeAssistant,
+        entry: MagicMock,
+    ) -> None:
+        """A download is often all we get from a user who cannot share logs."""
+        custom_dir = Path(hass.config.path(CUSTOM_PROFILE_DIR))
+        await hass.async_add_executor_job(partial(custom_dir.mkdir, exist_ok=True))
+        await hass.async_add_executor_job(
+            (custom_dir / "mine.yaml").write_text,
+            "version: 1\nvendor: acme\nproduct: thing\nmodel: T1\ndevices: [{nope: 1}]\n",
         )
 
         result = await async_get_config_entry_diagnostics(hass, entry)
 
-        assert "device_data_error" in result
-        # Verify error message is captured (generic message, not exception details)
-        assert isinstance(result["device_data_error"], str)
-        assert "Failed to retrieve device data" in result["device_data_error"]
+        problems = result["profile_files"]["problems"]
+        assert len(problems) == 1
+        assert problems[0]["kind"] == "invalid"
+        assert problems[0]["file"].endswith("esp_weaver/mine.yaml")
+        assert "extra keys not allowed" in problems[0]["detail"]
 
 
 class TestDeviceDiagnostics:
@@ -337,15 +361,15 @@ class TestDeviceDiagnostics:
 
         mock_esp_api.devices = {TEST_NODE_ID: {"ip": TEST_HOST}}
         mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
-        mock_esp_api.get_device_data = AsyncMock(
+        mock_esp_api.get_device_data = MagicMock(
             return_value={"ip": TEST_HOST, "test": "data"}
         )
 
         result = await async_get_device_diagnostics(hass, entry, mock_device_entry)
 
-        assert DIAG_DEVICE in result
-        assert DIAG_ENTRY in result
-        assert result[DIAG_DEVICE]["name"] == TEST_DEVICE_NAME
+        assert "device" in result
+        assert "entry" in result
+        assert result["device"]["name"] == TEST_DEVICE_NAME
 
         # Verify device data is returned
         assert "device_data" in result, "Expected 'device_data' key in result"
@@ -354,6 +378,80 @@ class TestDeviceDiagnostics:
         assert "***" in result["device_data"]["ip"], (
             "Expected IP to be redacted with ***"
         )
+
+    async def test_device_diagnostics_includes_profile_preview(
+        self,
+        hass: HomeAssistant,
+        mock_config_entry_data: dict[str, Any],
+        mock_coordinator: MagicMock,
+        mock_esp_api: MagicMock,
+        mock_device_entry: MagicMock,
+    ) -> None:
+        """Test device diagnostics rehearses the profile path."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+        entry.runtime_data = mock_coordinator
+        mock_coordinator.api = mock_esp_api
+
+        mock_esp_api.devices = {TEST_NODE_ID: {}}
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
+        mock_esp_api.get_device_data = MagicMock(return_value={})
+        mock_esp_api.get_reported_config = MagicMock(
+            return_value=(
+                {
+                    "node_id": TEST_NODE_ID,
+                    "devices": [
+                        {
+                            "name": "Sensor",
+                            "type": "esp.device.sensor",
+                            "params": [{"name": "Ambient Temperature"}],
+                        }
+                    ],
+                },
+                {},
+            )
+        )
+
+        result = await async_get_device_diagnostics(hass, entry, mock_device_entry)
+
+        preview = result["profiles"]
+        assert preview["reported"] == [
+            {
+                "kind": "device",
+                "name": "Sensor",
+                "type": "esp.device.sensor",
+                "params": ["Ambient Temperature"],
+            }
+        ]
+        # The profiles ship on disk, so loading them must have produced sources.
+        assert preview["registry"]["sources"]
+        assert set(preview["comparison"]) == {
+            "matched",
+            "only_in_bindings",
+            "only_in_registry",
+        }
+
+    async def test_device_diagnostics_without_a_reported_config(
+        self,
+        hass: HomeAssistant,
+        mock_config_entry_data: dict[str, Any],
+        mock_coordinator: MagicMock,
+        mock_esp_api: MagicMock,
+        mock_device_entry: MagicMock,
+    ) -> None:
+        """Test the preview says so when discovery has not run yet."""
+        entry = create_mock_config_entry(mock_config_entry_data)
+        entry.runtime_data = mock_coordinator
+        mock_coordinator.api = mock_esp_api
+
+        mock_esp_api.devices = {TEST_NODE_ID: {}}
+        mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
+        mock_esp_api.get_device_data = MagicMock(return_value={})
+        mock_esp_api.get_reported_config = MagicMock(return_value=({}, {}))
+
+        result = await async_get_device_diagnostics(hass, entry, mock_device_entry)
+
+        assert "profiles" not in result
+        assert "not reported a config" in result["profiles_error"]
 
     async def test_device_diagnostics_connectivity_info(
         self,
@@ -371,7 +469,7 @@ class TestDeviceDiagnostics:
 
         mock_esp_api.devices = {TEST_NODE_ID: {}}
         mock_esp_api.is_device_available_async = AsyncMock(return_value=True)
-        mock_esp_api.get_device_data = AsyncMock(return_value={})
+        mock_esp_api.get_device_data = MagicMock(return_value={})
 
         result = await async_get_device_diagnostics(hass, entry, mock_device_entry)
 

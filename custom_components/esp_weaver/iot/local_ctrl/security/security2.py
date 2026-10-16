@@ -16,9 +16,9 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .. import protocol as proto
 from ..utils import long_to_bytes, str_to_bytes
 from .security import Security
-from .srp6a import Srp6a, generate_salt_and_verifier
+from .srp6a import Srp6a
 
-__all__ = ["Security2", "sec2_gen_salt_verifier"]
+__all__ = ["Security2"]
 
 AES_KEY_LEN = 256 // 8
 
@@ -34,31 +34,6 @@ class SecurityState:
     FINISHED = 3
 
 
-def sec2_gen_salt_verifier(username: str, password: str, salt_len: int) -> None:
-    """Generate salt and verifier for security2 authentication.
-
-    Args:
-        username: Username for authentication.
-        password: Password for authentication.
-        salt_len: Length of salt in bytes.
-    """
-    salt, verifier = generate_salt_and_verifier(username, password, len_s=salt_len)
-
-    salt_str = ", ".join([format(b, "#04x") for b in salt])
-    salt_c_arr = "\n    ".join(
-        salt_str[i : i + 96] for i in range(0, len(salt_str), 96)
-    )
-    _LOGGER.info("static const char sec2_salt[] = {\n    %s\n};\n", salt_c_arr)
-
-    verifier_str = ", ".join([format(b, "#04x") for b in verifier])
-    verifier_c_arr = "\n    ".join(
-        verifier_str[i : i + 96] for i in range(0, len(verifier_str), 96)
-    )
-    _LOGGER.info(
-        "static const char sec2_verifier[] = {\n    %s\n};\n", verifier_c_arr
-    )
-
-
 class Security2(Security):
     """Security2 implementation using SRP6a and AES-GCM encryption.
 
@@ -72,7 +47,6 @@ class Security2(Security):
         sec_patch_ver: int,
         username: str,
         password: str,
-        verbose: bool = False,
     ) -> None:
         """Initialize Security2.
 
@@ -80,14 +54,12 @@ class Security2(Security):
             sec_patch_ver: Security patch version.
             username: Username for SRP6a authentication.
             password: Password for SRP6a authentication.
-            verbose: Enable verbose logging.
         """
         # Initialize state of the security2 FSM
         self.session_state = SecurityState.REQUEST1
         self.sec_patch_ver = sec_patch_ver
         self.username = username
         self.password = password
-        self.verbose = verbose
 
         self.srp6a_ctx: Srp6a | None = None
         self.cipher: AESGCM | None = None
@@ -124,16 +96,6 @@ class Security2(Security):
 
         return None
 
-    def _print_verbose(self, data: str) -> None:
-        """Print verbose debug output if enabled.
-
-        Args:
-            data: Debug message to print.
-        """
-        # Verbose output disabled for Home Assistant integration
-        # In production, this would log to a debug logger
-        _ = data  # Acknowledge the parameter
-
     def setup0_request(self) -> Any:
         """Form SessionCmd0 request packet using client public key."""
         setup_req = proto.session_pb2.SessionData()
@@ -147,8 +109,6 @@ class Security2(Security):
 
         client_pubkey = long_to_bytes(self.srp6a_ctx.public_ephemeral)
         setup_req.sec2.sc0.client_pubkey = client_pubkey
-
-        self._print_verbose(f"Client Public Key:\t0x{client_pubkey.hex()}")
         return setup_req.SerializeToString().decode("latin-1")
 
     def setup0_response(self, response_data: bytes) -> None:
@@ -162,15 +122,12 @@ class Security2(Security):
         """
         setup_resp = proto.session_pb2.SessionData()
         setup_resp.ParseFromString(str_to_bytes(response_data))
-        self._print_verbose(f"Security version:\t{setup_resp.sec_ver!s}")
         if setup_resp.sec_ver != proto.session_pb2.SecScheme2:
             raise RuntimeError("Incorrect security scheme")
 
         # Device public key, random salt and password verifier
         device_pubkey = setup_resp.sec2.sr0.device_pubkey
         device_salt = setup_resp.sec2.sr0.device_salt
-
-        self._print_verbose(f"Device Public Key:\t0x{device_pubkey.hex()}")
         self.client_pop_key = self.srp6a_ctx.process_challenge(
             device_salt, device_pubkey
         )
@@ -184,8 +141,6 @@ class Security2(Security):
         # Encrypt device public key and attach to the request packet
         if self.client_pop_key is None:
             raise RuntimeError("Failed to generate client proof!")
-
-        self._print_verbose(f"Client Proof:\t0x{self.client_pop_key.hex()}")
         setup_req.sec2.sc1.client_proof = self.client_pop_key
 
         return setup_req.SerializeToString().decode("latin-1")
@@ -205,7 +160,6 @@ class Security2(Security):
         if setup_resp.sec_ver == proto.session_pb2.SecScheme2:
             # Read encrypted device proof string
             device_proof = setup_resp.sec2.sr1.device_proof
-            self._print_verbose(f"Device Proof:\t0x{device_proof.hex()}")
             self.srp6a_ctx.verify_session(device_proof)
             if not self.srp6a_ctx.authenticated():
                 raise RuntimeError("Failed to verify device proof")
@@ -214,17 +168,14 @@ class Security2(Security):
 
         # Getting the shared secret
         shared_secret = self.srp6a_ctx.get_session_key()
-        self._print_verbose(f"Shared Secret:\t0x{shared_secret.hex()}")
 
         # Using the first 256 bits of a 512 bit key
         session_key = shared_secret[:AES_KEY_LEN]
-        self._print_verbose(f"Session Key:\t0x{session_key.hex()}")
 
         # 96-bit nonce
         self.nonce = bytearray(setup_resp.sec2.sr1.device_nonce)
         if self.nonce is None:
             raise RuntimeError("Received invalid nonce from device!")
-        self._print_verbose(f"Nonce:\t0x{self.nonce.hex()}")
 
         # Initialize the encryption engine with Shared Key and initialization vector
         self.cipher = AESGCM(session_key)
@@ -250,7 +201,6 @@ class Security2(Security):
         Returns:
             Encrypted data with authentication tag.
         """
-        self._print_verbose(f"Nonce:\t0x{self.nonce.hex()}")
         ciphertext = self.cipher.encrypt(self.nonce, data, None)
         self._increment_nonce()
         return ciphertext
@@ -264,7 +214,6 @@ class Security2(Security):
         Returns:
             Decrypted data.
         """
-        self._print_verbose(f"Nonce:\t0x{self.nonce.hex()}")
         plaintext = self.cipher.decrypt(self.nonce, data, None)
         self._increment_nonce()
         return plaintext

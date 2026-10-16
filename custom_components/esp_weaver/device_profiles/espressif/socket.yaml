@@ -1,0 +1,25 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: socket
+product_label: "Socket"
+product_labels:
+  zh-Hans: "插座"
+model: "*"
+
+devices:
+  - type: esp.device.socket
+    entities:
+      - platform: switch
+        name: "Socket"
+        key: socket
+        device_class: outlet
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]

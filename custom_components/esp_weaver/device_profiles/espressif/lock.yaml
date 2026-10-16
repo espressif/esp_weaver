@@ -1,0 +1,28 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: lock
+product_label: "Lock"
+product_labels:
+  zh-Hans: "锁"
+model: "*"
+
+devices:
+  # RainMaker reports Lock State numerically. Home Assistant maps 0, 1, and 2
+  # to unlocked, locked, and jammed; lock and unlock write 1 and 0.
+  - type: esp.device.lock
+    entities:
+      - platform: lock
+        name: "Lock"
+        key: lock
+        attributes:
+          state:
+            param: "Lock State"
+            type: esp.param.lockstate
+            data_type: int
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+            bounds: { min: 0, max: 2, step: 1 }
+            map: { 0: unlocked, 1: locked, 2: jammed }

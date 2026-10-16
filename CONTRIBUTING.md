@@ -8,7 +8,7 @@ Thank you for your interest in contributing to ESP-Weaver! This document provide
 
 - Python 3.13.2 or higher
 - Home Assistant Core 2025.12.5 or higher
-- An ESP device with ESP Local Control enabled
+- An ESP device running ESP-Weaver firmware with local control (see the README, section "Device Firmware")
 
 ### Development Setup
 
@@ -19,151 +19,119 @@ Thank you for your interest in contributing to ESP-Weaver! This document provide
    cd esp_weaver
    ```
 
-2. Install development dependencies:
+2. Create a virtual environment and install the test and lint dependencies. `requirements_test.txt` is the single list; it pulls in Home Assistant through `pytest-homeassistant-custom-component`:
 
    ```bash
-   # Recommended: Install package with dev dependencies (editable mode)
-   pip install -e ".[dev]"
-
-   # Alternative: Install from requirements file
-   # Use this if you need additional test utilities not included in [dev]
+   python3 -m venv .venv
+   source .venv/bin/activate
    pip install -r requirements_test.txt
    ```
 
-   > **Note**: For most contributors, `pip install -e ".[dev]"` is sufficient. The `requirements_test.txt` file includes additional utilities that may be useful for CI/CD environments or advanced testing scenarios.
+   Cloud control is not supported in this release (`CLOUD_CONTROL_ENABLED` is
+   False); the tests mock the `esp-rainmaker-cli` subprocess, so nothing beyond
+   `requirements_test.txt` is needed.
 
-3. Run tests to verify setup:
+3. Run the tests to verify the setup:
 
    ```bash
    pytest tests/
    ```
 
-4. Copy the integration to your Home Assistant custom_components directory:
-
-   **Linux/macOS:**
+4. To try the integration in a Home Assistant instance, copy it into that instance's `custom_components` directory. `install.sh` does this on Linux and macOS:
 
    ```bash
-   cp -r custom_components/esp_weaver /path/to/homeassistant/config/custom_components/
+   ./install.sh /path/to/homeassistant/config
    ```
 
-   **Windows (PowerShell):**
-
-   ```powershell
-   Copy-Item -Recurse custom_components\esp_weaver $env:USERPROFILE\.homeassistant\custom_components\
-   ```
-
-   **Cross-platform (Python 3.13.2+):**
+   On any platform:
 
    ```bash
    python -c "import shutil; shutil.copytree('custom_components/esp_weaver', '/path/to/config/custom_components/esp_weaver', dirs_exist_ok=True)"
    ```
 
-   > **Note**: The `dirs_exist_ok=True` parameter allows overwriting an existing directory.
-
-   > **Note**: Windows users can also use Git Bash or WSL to run the Unix `cp` command. The typical Home Assistant config path on Windows is `%USERPROFILE%\.homeassistant\`.
-
 ## Code Style
 
-This project uses [ruff](https://github.com/astral-sh/ruff) for code formatting and linting.
-
-### Before Submitting
-
-Run the following checks:
+The checks below are what CI runs; the versions are pinned in `requirements_test.txt`. Run them all before pushing:
 
 ```bash
-# Format code
-ruff format .
+ruff format custom_components tests tools
+ruff check custom_components tests tools
+mypy custom_components/esp_weaver tests
+pylint custom_components/esp_weaver
+codespell
+yamllint .gitlab-ci.yml .github custom_components/esp_weaver/quality_scale.yaml custom_components/esp_weaver/device_profiles
+python tools/check_profile_keys.py
+python tools/check_shipped_profiles.py --repository ../esp-weaver-profiles   # with a checkout of the profile repository; --sync copies it over
+python tools/check_profile_code_sync.py --repository ../esp-weaver-profiles  # same checkout; --sync copies the profile code over
+```
 
-# Check for issues
-ruff check .
+`iot/local_ctrl/` is excluded from ruff, mypy and pylint in `pyproject.toml`;
+pylint runs over the integration only.
+
+The test suite has to stay above 95% line coverage, and the config flow (`config_flow.py` and the `flows/` package) at 100%:
+
+```bash
+pytest tests/ --cov=custom_components/esp_weaver --cov-fail-under=95
+pytest tests/ -k config_flow --cov=custom_components.esp_weaver.config_flow --cov=custom_components.esp_weaver.flows --cov-fail-under=100
 ```
 
 ### Style Guidelines
 
-- Follow PEP 8 guidelines
-- Use type hints for all function parameters and return values
-- Write docstrings for all public functions and classes
-- Keep lines under 88 characters
-- Use `async`/`await` for all I/O operations
-  - **Enforcement**: Ruff ASYNC rules detect blocking calls inside async functions:
-    - `ASYNC210`: Blocking HTTP calls (e.g., `urllib`, `requests`)
-    - `ASYNC220`/`ASYNC221`: Blocking process calls (e.g., `subprocess`, `os.system`)
-    - `ASYNC230`: Blocking file operations (e.g., `open()`, synchronous file I/O)
-    - `ASYNC251`: Blocking sleep calls (e.g., `time.sleep()`)
-  - **CI validation**: The `ruff check .` step in the PR workflow fails the build if blocking calls are detected in async code
-  - Run `ruff check . --select=ASYNC` locally to verify before submitting
+- Follow the Home Assistant core conventions; `pyproject.toml` carries the same ruff, mypy and pylint configuration
+- Type hints on every function; mypy runs in strict mode over the whole package
+- Docstrings on every public function and class, one sentence saying what it does
+- Lines under 88 characters
+- `async`/`await` for all I/O; blocking calls go through `hass.async_add_executor_job`. Ruff's `ASYNC` rules fail the build on a blocking call inside a coroutine
+- `iot/` must not import `homeassistant`: it talks to its host through the `IotHost` protocol in `helpers/host.py`
+- `iot/local_ctrl/` is derived from the esp-idf `esp_local_ctrl` tooling and kept in its style; it is excluded from the lint and coverage gates
 
-## Pull Request Process
+## Change Process
 
-1. Fork the repository
-2. Create a branch from `main` using a descriptive name:
+The repository is developed on GitLab and mirrored to GitHub. The default branch is `master`.
 
-   **Branch naming pattern:** `type/ISSUE-123-short-description` or `type/short-description`
+1. Create a branch from `master`, named `<type>/<short-description>`, where `<type>` is one of the Conventional Commits types below
+2. Make your changes, with tests for anything new or fixed
+3. Run the checks above
+4. Commit with a [Conventional Commits](https://www.conventionalcommits.org/) message: `feat: ...`, `fix: ...`, `docs: ...`, `refactor: ...`, `test: ...`, `chore: ...`
+5. Add an entry to `CHANGELOG.md` under the version being prepared, in its `Added`, `Changed` or `Fixed` list, written for the user: what changes for them, not which function moved
+6. Open a merge request against `master`; CI has to pass before review
 
-   | Prefix     | Use case                                      | Example                              |
-   |------------|-----------------------------------------------|--------------------------------------|
-   | `feature/` | New functionality                             | `feature/42-add-humidity-alerts`     |
-   | `bugfix/`  | Bug fixes                                     | `bugfix/108-fix-connection-timeout`  |
-   | `hotfix/`  | Urgent production fixes                       | `hotfix/critical-auth-bypass`        |
-   | `docs/`    | Documentation changes                         | `docs/update-installation-guide`     |
-   | `refactor/`| Code restructuring without behavior change    | `refactor/simplify-discovery-logic`  |
-   | `test/`    | Adding or updating tests                      | `test/add-coordinator-tests`         |
-   | `chore/`   | Maintenance tasks (deps, CI, tooling)         | `chore/upgrade-ruff-config`          |
+A pull request opened on GitHub cannot be merged there: the mirror is one
+way. A maintainer fetches it into a branch on GitLab and merges it as a merge
+request; the next mirror run carries it to GitHub.
 
-   ```bash
-   git checkout -b feature/your-feature-name
-   # or with issue reference:
-   git checkout -b bugfix/123-fix-sensor-discovery
-   ```
+Product profiles are not in this repository. They live in the profile
+repository, [`espressif/esp-weaver-profiles`](https://github.com/espressif/esp-weaver-profiles), whose README says how to
+submit one and how its `index.json` is kept current. The version 1 profile
+logic exists twice: `custom_components/esp_weaver/profiles/` here, and
+`tools/profilelib/` in that repository, whose own `tools/build_index.sh`
+runs it with PyYAML and voluptuous alone. Keep the modules here (`index`,
+and what it imports: `schema`, `product`) free of Home Assistant - a test
+checks it - and keep the two copies identical: edit both, or copy this
+repository's over with the tool below. No CI compares the copies (or the
+shipped profiles) across the two repositories: they merge independently,
+and maintainers run the comparisons below by hand against a local checkout
+of the profile repository before merging a change that touches both.
 
-3. Make your changes
-4. Run linting checks:
+Espressif's products also live in that repository (`vendors/espressif/`). The
+integration ships a copy under
+`custom_components/esp_weaver/device_profiles/espressif/`; maintainers update
+that copy when the repository changes (commit and merge as usual). From a
+checkout of the profile repository::
 
-   ```bash
-   ruff format . && ruff check .
-   ```
+    python tools/check_shipped_profiles.py --repository ../esp-weaver-profiles   # compare; --sync copies it over
+    python tools/check_profile_code_sync.py --repository ../esp-weaver-profiles  # compare the code copies; --sync copies them over
 
-5. Run tests:
+CI also runs `tools/check_profile_keys.py` so no device type declares the
+same entity key twice.
 
-   ```bash
-   pytest tests/
-   ```
 
-6. Commit your changes with a descriptive message
-7. Push to your fork and submit a Pull Request
+### Guidelines
 
-### PR Guidelines
-
-- Keep PRs focused on a single feature or fix
-- Update documentation if needed
-- Add tests for new features or bug fixes
-- Ensure all tests pass before submitting
-- Add entries to CHANGELOG.md under `[Unreleased]` using this format:
-
-  ```markdown
-  ## [Unreleased]
-
-  ### Added
-  - Brief description of new feature (#PR-NUMBER)
-
-  ### Changed
-  - Brief description of modification (#PR-NUMBER)
-
-  ### Fixed
-  - Brief description of bug fix (#PR-NUMBER)
-
-  ### Deprecated
-  - Brief description of deprecated feature (#PR-NUMBER)
-  ```
-
-  **Example entry:**
-
-  ```markdown
-  ### Fixed
-  - Resolve connection timeout when device is in deep sleep mode (#142)
-  ```
-
-- PRs will be validated by automated CI checks (linting, tests) before review
+- Keep each change to one feature or fix
+- Update the README and `docs/device_profiles_in_detail.md` when behaviour they describe changes; `README_zh.md` and `docs/device_profiles_in_detail_zh.md` are kept in step with them
+- A new string goes in `strings.json` and in both `translations/*.json`; a new step or error in the flow needs a test
+- A new or changed entity key in a shipped profile changes the `unique_id` of existing entities; `tools/check_profile_keys.py` lists them
 
 ## Reporting Issues
 
@@ -176,9 +144,10 @@ Include the following information:
 - Home Assistant version
 - ESP-Weaver integration version
 - ESP device model and firmware version
+- The product profile the device is bound to
 - Steps to reproduce
 - Expected vs actual behavior
-- Relevant logs (Settings → System → Logs)
+- Relevant logs (Settings → System → Logs), and the integration's diagnostics download if the device is set up
 
 ### Feature Requests
 
@@ -195,4 +164,3 @@ Please be respectful and constructive in all interactions. We're all here to lea
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
-

@@ -21,15 +21,8 @@ class Security0(Security):
     for development/testing purposes only.
     """
 
-    def __init__(self, verbose: bool = False):
-        """Initialize Security0.
-
-        Args:
-            verbose: Enable verbose logging (kept for API compatibility).
-        """
-        # Initialize state of the security0 FSM
-        # Note: verbose parameter kept for API compatibility with other security classes
-        self._verbose = verbose
+    def __init__(self) -> None:
+        """Initialize the security0 state machine."""
         self.session_state = 0
         super().__init__(self.security0_session)
 

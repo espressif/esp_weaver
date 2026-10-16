@@ -2,11 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""ESP Local Control client utility functions.
-
-This module provides utility functions for working with ESP Local Control clients,
-including value conversion, response parsing, and property handling.
-"""
+"""Turning values into what an ESP device expects, and its answers back again."""
 
 import json
 import logging
@@ -18,36 +14,18 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def convert_values_to_esp_format(values: list[Any]) -> list[bytes]:
-    """Convert Python values to ESP-IDF byte format.
+    """Render values as the bytes the protocol carries.
 
-    Converts various Python types to the byte format expected by ESP-IDF
-    Local Control protocol:
-    - Bytes values are passed through unchanged (already in correct format)
-    - Strings are encoded directly to bytes using UTF-8
-    - Other types (int, bool, dict, etc.) are first converted to JSON strings,
-      then encoded to bytes
-
-    Args:
-        values: List of Python values to convert (bytes, strings, numbers, bools,
-            dicts, etc.)
-
-    Returns:
-        List of byte strings suitable for ESP-IDF protocol transmission.
-
-    Example:
-        >>> convert_values_to_esp_format([b'raw', "hello", 42, True, {"key": "value"}])
-        [b'raw', b'hello', b'42', b'true', b'{"key": "value"}']
+    Anything that is not already text or bytes goes as JSON, which is how the
+    firmware reads a number, a boolean or a nested parameter payload.
     """
     esp_values: list[bytes] = []
     for val in values:
         if isinstance(val, str):
-            # String values need to be encoded to bytes
             esp_values.append(val.encode("utf-8"))
         elif isinstance(val, bytes):
-            # Bytes values can be used as-is
             esp_values.append(val)
         else:
-            # Other types → JSON string → bytes
             try:
                 json_str = json.dumps(val, ensure_ascii=False)
                 esp_values.append(json_str.encode("utf-8"))
@@ -63,15 +41,9 @@ def convert_values_to_esp_format(values: list[Any]) -> list[bytes]:
 
 
 def parse_property_count_response(parsed_data: Any) -> int:
-    """Parse property count from ESP Local Control response.
+    """Read how many properties a device says it has, or 0 if it did not say.
 
-    Expected format: {"count": N}
-
-    Args:
-        parsed_data: Parsed response data from ESP device (typically a dict)
-
-    Returns:
-        Number of properties found in the response, or 0 if invalid/empty.
+    A bool is not a count.
     """
     if not isinstance(parsed_data, dict):
         return 0
@@ -84,24 +56,13 @@ def parse_property_count_response(parsed_data: Any) -> int:
 
 
 def parse_property_values_response(props_data: Any) -> list[dict[str, Any]]:
-    """Parse property values from ESP Local Control response.
-
-    Args:
-        props_data: Parsed response data from ESP device
-
-    Returns:
-        List of property dictionaries. Each dictionary represents a property
-        from the device response. The structure of each dictionary depends on
-        the device implementation; common keys include 'name' and 'value',
-        but callers should validate the presence of required keys.
-    """
+    """Return the properties in a device's answer, keeping only the dicts."""
     if not isinstance(props_data, dict):
         return []
 
     if KEY_PROPERTIES in props_data:
         properties = props_data[KEY_PROPERTIES]
         if isinstance(properties, list):
-            # Validate and filter items
             valid_properties = []
             for idx, prop in enumerate(properties):
                 if isinstance(prop, dict):

@@ -11,9 +11,9 @@ import contextlib
 import logging
 import socket
 import threading
-from http.client import HTTPConnection, HTTPSConnection
+from http.client import HTTPConnection
 
-from ...specs.device_specs import HTTP_CONNECTION_TIMEOUT
+from ..const import HTTP_CONNECTION_TIMEOUT
 from ..utils import str_to_bytes
 from .transport import Transport
 
@@ -25,32 +25,36 @@ _LOGGER = logging.getLogger(__name__)
 class TransportHTTP(Transport):
     """HTTP transport for ESP Local Control protocol."""
 
-    def __init__(self, hostname, ssl_context=None):
-        """Initialize HTTP transport.
+    def __init__(self, hostname: str) -> None:
+        """Open a connection to the device.
+
+        Plain HTTP: esp_local_ctrl secures the payload itself, at the
+        protocomm layer, and advertises no TLS.
 
         Args:
             hostname: Device hostname or IP address.
-            ssl_context: Optional SSL context for HTTPS.
+
+        Raises:
+            RuntimeError: The device could not be connected to.
         """
         self._lock = threading.Lock()
-        if ssl_context is None:
-            self.conn = HTTPConnection(hostname, timeout=HTTP_CONNECTION_TIMEOUT)
-        else:
-            self.conn = HTTPSConnection(
-                hostname, context=ssl_context, timeout=HTTP_CONNECTION_TIMEOUT
-            )
+        self.conn: HTTPConnection | None = HTTPConnection(
+            hostname, timeout=HTTP_CONNECTION_TIMEOUT
+        )
         try:
             self.conn.connect()
-        except (OSError, ConnectionError) as err:
+        except OSError as err:
             raise RuntimeError("Connection Failure : " + str(err)) from err
         self.headers = {
             "Content-type": "application/x-www-form-urlencoded",
             "Accept": "text/plain",
         }
 
-    def _send_post_request(self, path, data):
+    def _send_post_request(self, path: str, data: str | bytes) -> str:
         """Send POST and wait for response (synchronous)."""
         with self._lock:
+            if self.conn is None:
+                raise RuntimeError("Connection not available")
             data = str_to_bytes(data) if isinstance(data, str) else data
             try:
                 self.conn.request("POST", path, data, self.headers)
@@ -62,21 +66,20 @@ class TransportHTTP(Transport):
                     return response.read().decode("latin-1")
                 # Consume response body to keep connection reusable
                 response.read()
-            except (OSError, ConnectionError) as err:
+            except OSError as err:
                 raise RuntimeError("Connection Failure : " + str(err)) from err
             raise RuntimeError(
                 "Server responded with error code " + str(response.status)
             )
 
-    def _send_post_request_no_response(self, path, data):
+    def _send_post_request_no_response(self, path: str, data: str | bytes) -> None:
         """Send POST request without waiting for response (for listener mode)."""
         with self._lock:
             data = str_to_bytes(data) if isinstance(data, str) else data
             try:
-                if self.conn and self.conn.sock:
+                if self.conn is not None and self.conn.sock:
                     host = self.conn.host
-                    default_port = 443 if isinstance(self.conn, HTTPSConnection) else 80
-                    if self.conn.port and self.conn.port != default_port:
+                    if self.conn.port and self.conn.port != 80:
                         host_header = f"{host}:{self.conn.port}"
                     else:
                         host_header = host
@@ -91,14 +94,20 @@ class TransportHTTP(Transport):
                     self.conn.sock.sendall(request)
                 else:
                     raise RuntimeError("Connection not available")
-            except (OSError, ConnectionError) as err:
+            except OSError as err:
                 raise RuntimeError("Connection Failure : " + str(err)) from err
 
-    def reset_connection(self):
-        """Clear http.client internal state, keep socket open for listener."""
+    def reset_connection(self) -> None:
+        """Clear http.client internal state, keep socket open for listener.
+
+        http.client refuses a new request while it believes the previous
+        response is unread, and after the handshake the socket is read as a
+        stream by the listener instead. The state lives in private attributes
+        of HTTPConnection, so this reaches into them; there is no public way.
+        """
         with self._lock:
             try:
-                if not self.conn:
+                if self.conn is None:
                     return
 
                 if hasattr(self.conn, "_HTTPConnection__response"):
@@ -112,23 +121,30 @@ class TransportHTTP(Transport):
             except (OSError, AttributeError):
                 _LOGGER.debug("Unexpected exception in reset_connection", exc_info=True)
 
-    def close(self):
+    def close(self) -> None:
         """Close HTTP connection gracefully."""
         with self._lock:
             try:
-                if self.conn:
-                    with contextlib.suppress(OSError):
-                        if hasattr(self.conn, "sock") and self.conn.sock:
-                            self.conn.sock.shutdown(socket.SHUT_RDWR)
-                    with contextlib.suppress(OSError):
-                        if hasattr(self.conn, "sock") and self.conn.sock:
-                            self.conn.sock.close()
-                            self.conn.sock = None
+                if self.conn is not None:
+                    sock = self.conn.sock
+                    if sock:
+                        with contextlib.suppress(OSError):
+                            sock.shutdown(socket.SHUT_RDWR)
+                        with contextlib.suppress(OSError):
+                            sock.close()
+                        self.conn.sock = None
                     with contextlib.suppress(OSError):
                         self.conn.close()
                     self.conn = None
             except (OSError, AttributeError):
                 _LOGGER.debug("Exception during connection close", exc_info=True)
+
+    def socket(self) -> socket.socket | None:
+        """Return the connection's socket, if it is open."""
+        conn = self.conn
+        if conn is None:
+            return None
+        return conn.sock
 
     def is_socket_healthy(self) -> bool:
         """Check if the underlying socket is healthy and connection is valid.
@@ -144,11 +160,7 @@ class TransportHTTP(Transport):
         """
         with self._lock:
             try:
-                if (
-                    not self.conn
-                    or not hasattr(self.conn, "sock")
-                    or self.conn.sock is None
-                ):
+                if self.conn is None or self.conn.sock is None:
                     return False
 
                 sock = self.conn.sock
@@ -181,7 +193,7 @@ class TransportHTTP(Transport):
             except (OSError, AttributeError):
                 return False
 
-    async def send_data(self, ep_name: str, data):
+    async def send_data(self, ep_name: str, data: str | bytes) -> str:
         """Send and return response.
 
         Args:
@@ -196,7 +208,7 @@ class TransportHTTP(Transport):
             None, self._send_post_request, "/" + ep_name, data
         )
 
-    async def send_data_no_response(self, ep_name: str, data):
+    async def send_data_no_response(self, ep_name: str, data: str | bytes) -> None:
         """Send without waiting for response.
 
         Args:

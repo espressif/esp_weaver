@@ -1,0 +1,41 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: vacuum
+product_label: "Vacuum"
+product_labels:
+  zh-Hans: "扫地机器人"
+model: "*"
+
+devices:
+  - type: esp.device.vacuum
+    entities:
+      - platform: vacuum
+        name: "Vacuum"
+        key: vacuum
+        attributes:
+          # This extended type uses Home Assistant activity names directly.
+          # Home Assistant offers a command only when the firmware reports the
+          # corresponding activity as a valid value.
+          activity:
+            param: "State"
+            type: esp.param.mode
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            options: [cleaning, docked, idle, paused, returning, error]
+          # Single-speed models may omit this parameter. Other models obtain their
+          # vendor-defined speed names from the firmware's valid value list.
+          fan_speed:
+            param: "Fan Speed"
+            type: esp.param.mode
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+        # Home Assistant has no vacuum battery field, so the value is displayed
+        # as a read-only extra attribute.
+        extra_attributes:
+          battery_level: { param: "Battery", type: esp.param.range, properties: [read] }

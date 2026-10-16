@@ -1,0 +1,39 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: alarm_panel
+product_label: "Alarm panel"
+product_labels:
+  zh-Hans: "报警面板"
+model: "*"
+
+devices:
+  # This extended type uses a five-state string required by Home Assistant's
+  # alarm panel. It remains distinct from RainMaker's official security-panel
+  # type, whose Arm State is a two-state boolean.
+  - type: esp.device.alarm-panel
+    entities:
+      - platform: alarm_control_panel
+        name: "Security Panel"
+        key: alarm_panel
+        attributes:
+          # Home Assistant arms through services, while RainMaker provides no
+          # user-code field. Additional arm modes become available when the
+          # firmware includes them in its valid value list.
+          state:
+            param: "Arm State"
+            type: esp.param.mode
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            options: [disarmed, armed_home, armed_away, armed_night, triggered]
+        # Home Assistant displays zone alarms as read-only details. Firmware
+        # that needs dedicated smoke, moisture, gas, or safety binary sensors
+        # requires a custom profile.
+        extra_attributes:
+          fire_alarm:     { param: "Fire Alarm State",     type: esp.param.toggle, properties: [read] }
+          water_alarm:    { param: "Water Alarm State",    type: esp.param.toggle, properties: [read] }
+          co_alarm:       { param: "CO Alarm State",       type: esp.param.toggle, properties: [read] }
+          burglary_alarm: { param: "Burglary Alarm State", type: esp.param.toggle, properties: [read] }

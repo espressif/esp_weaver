@@ -4,27 +4,30 @@
 
 """ESP Device API - Main interface for ESP device management."""
 
-# Allow relative imports within iot package
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components import zeroconf
-from homeassistant.core import HomeAssistant
 from zeroconf import ServiceBrowser
 
 from ..cloud import RainMakerCLIClient
-from ..discovery.network import MDNS_SERVICE_TYPE, GlobalMDNSListener
+from ..discovery import MDNS_SERVICE_TYPE, GlobalMDNSListener
+from ..host import IotHost
+from ..local_ctrl import local_ctrl
 from ..managers.availability_manager import AvailabilityManager
 from ..managers.connection_manager import ConnectionManager
-from ..managers.device_registry import DeviceRegistry
-from ..managers.entity_discovery import DeviceDiscoveryManager
-from ..managers.property_manager import ConnectionCallbacks, PropertyManager
-from ..parsers.property_parser import get_device_states
-from ..payload.command_builder import build_device_command
-from ..specs.keys import CONNECTION_MODE_CLOUD, CONNECTION_MODE_LOCAL
+from ..managers.device_registry import DeviceInfo, DeviceRegistry
+from ..managers.entity_discovery import BindingResolver, DeviceDiscoveryManager
+from ..managers.property_manager import (
+    ConnectionCallbacks,
+    PropertyManager,
+    WriteOutcome,
+)
+from ..parsers.property_parser import get_raw_params
+from ..specs.device_specs import DEFAULT_PORT
+from ..specs.keys import CONNECTION_MODE_CLOUD, CONNECTION_MODE_LOCAL, KEY_PROPERTIES
 
 if TYPE_CHECKING:
     from zeroconf import Zeroconf
@@ -33,45 +36,50 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class ESPWeaverApi:  # pylint: disable=too-many-public-methods
-    """API coordinator for ESP-Weaver devices."""
+    """Facade over the IoT managers for one Home Assistant instance.
+
+    Public methods deliberately forward to ``ConnectionManager``,
+    ``PropertyManager``, ``DeviceDiscoveryManager``, ``AvailabilityManager``,
+    and optional cloud clients. Callers (coordinator, flows, entities) should
+    keep using this type rather than reaching into managers. The wide surface
+    is intentional glue, not a second business layer — prefer adding behaviour
+    on the manager that owns it, then expose a thin method here if HA code
+    needs it.
+    """
 
     def __init__(
         self,
-        hass: HomeAssistant,
-        domain: str,
-        default_port: int = 8080,
+        host: IotHost,
+        *,
+        resolve_bindings: BindingResolver,
+        default_port: int = DEFAULT_PORT,
         event_dispatcher: Callable[[str, dict[str, Any]], None] | None = None,
+        device_auth: Callable[[str], tuple[str, int]] | None = None,
     ) -> None:
         """Initialize the ESP-Weaver API coordinator.
 
         Args:
-            hass: Home Assistant instance.
-            domain: Integration domain name.
-            default_port: Default port for ESP devices.
-            event_dispatcher: Callback for dispatching property update events.
-                            Signature: (node_id: str, params_data: dict) -> None
-                            If None, property updates won't fire events.
+            host: The application this runs in; see :class:`IotHost`.
+            resolve_bindings: Turns a node's report into entity bindings.
+            event_dispatcher: Called as ``(node_id, params)`` on every report.
+            device_auth: Returns ``(pop, security_version)`` for a node.
         """
-        self.hass = hass
-        self.domain = domain
+        self.host = host
         self.default_port = default_port
         self.registry = DeviceRegistry(default_port)
 
-        self._availability = AvailabilityManager(hass, self.registry, default_port)
-        self._discovery = DeviceDiscoveryManager(hass, domain, self.registry)
+        self._availability = AvailabilityManager(host, self.registry, default_port)
+        self._discovery = DeviceDiscoveryManager(host, self.registry, resolve_bindings)
         self._property = PropertyManager(
-            hass,
-            domain,
             self.registry,
             event_dispatcher=event_dispatcher,
         )
         self._connection = ConnectionManager(
-            hass,
-            domain,
+            host,
             self.registry,
-            message_handler_factory=self._property.create_message_handler,
-            property_extractor=get_device_states,
-            property_processor=self.process_property_update,
+            message_handler_factory=self._active_report_handler,
+            on_properties=self.publish_properties,
+            device_auth=device_auth,
         )
 
         # Inject connection callbacks after all managers are initialized
@@ -79,26 +87,18 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
         self._property.set_connection_callbacks(
             ConnectionCallbacks(
                 establish_connection=self._connect_and_sync_device,
-                reconnect_and_retry=self._reconnect_and_retry_property,
+                reconnect_and_retry_params=self._reconnect_and_retry_params,
             )
         )
 
         self._global_browser: ServiceBrowser | None = None
         self._global_listener: GlobalMDNSListener | None = None
+        self._registering: dict[str, asyncio.Future[bool]] = {}
 
         # Cloud control: per-device client (supports mixed regions)
         self._cloud_clients: dict[str, RainMakerCLIClient] = {}
         # Mapping of node_id to connection_mode ("local" or "cloud")
         self._device_connection_modes: dict[str, str] = {}
-
-    # Public Properties - Direct access to managers
-
-    @property
-    def devices(self) -> dict[str, Any]:
-        """Get all registered devices as dict."""
-        return {k: v.to_dict() for k, v in self.registry.get_all_devices().items()}
-
-    # Cloud Control Methods
 
     def set_cloud_client(self, node_id: str, client: RainMakerCLIClient) -> None:
         """Set the cloud client for a specific device."""
@@ -114,25 +114,6 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
     def _get_cloud_client(self, node_id: str) -> RainMakerCLIClient | None:
         """Get the cloud client for a device."""
         return self._cloud_clients.get(node_id)
-
-    async def _set_cloud_property(
-        self,
-        node_id: str,
-        prop_name: str,
-        value: Any,
-    ) -> bool:
-        """Set device property via cloud using the same command builder as local."""
-        client = self._get_cloud_client(node_id)
-        if not client:
-            _LOGGER.error("Cloud client not configured for %s", node_id)
-            return False
-
-        params = build_device_command(prop_name, value)
-        if not params:
-            _LOGGER.error("Failed to build cloud command for parameter: %s", prop_name)
-            return False
-
-        return await client.set_params(node_id, params)
 
     async def get_cloud_params(self, node_id: str) -> dict[str, Any] | None:
         """Get device parameters from cloud."""
@@ -157,8 +138,6 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
             return None
         return await client.get_node_connectivity(node_id)
 
-    # Device Availability
-
     async def is_device_available_async(self, node_id: str) -> bool:
         """Check if device is available (async version)."""
         if self.is_cloud_device(node_id):
@@ -176,8 +155,6 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
             node_id, expected_ip
         )
 
-    # Entity Discovery
-
     def is_discovery_completed(self, node_id: str) -> bool:
         """Check if entity discovery is completed for a device."""
         return self.registry.is_discovery_completed(node_id)
@@ -186,62 +163,91 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
         """Mark entity discovery as completed for a device."""
         self.registry.mark_discovery_completed(node_id)
 
-    async def parse_and_discover_entities(
-        self,
-        node_id: str,
-        properties: list,
-        preferred_device_name: str | None = None,
-    ) -> None:
+    async def parse_and_discover_entities(self, node_id: str, properties: list) -> None:
         """Parse device configuration and trigger entity discovery."""
-        await self._discovery.parse_and_discover_entities(
-            node_id, properties, preferred_device_name
-        )
+        await self._discovery.parse_and_discover_entities(node_id, properties)
 
     async def discover_from_cloud(
         self,
         node_id: str,
         node_config: dict[str, Any],
         cloud_params: dict[str, Any],
-        device_name: str,
     ) -> None:
         """Discover entities from cloud device config."""
-        await self._discovery.discover_from_cloud(
-            node_id, node_config, cloud_params, device_name
-        )
+        await self._discovery.discover_from_cloud(node_id, node_config, cloud_params)
 
-    # Property Operations
+    async def publish_params(self, node_id: str, params: dict[str, Any]) -> None:
+        """Hand a node's full report to its entities, and keep it as the latest.
 
-    async def _set_local_property(
-        self,
-        node_id: str,
-        prop_name: str,
-        value: Any,
-    ) -> bool:
-        """Set device property value via local control."""
-        return await self._property.set_property(node_id, prop_name, value)
+        The one route a report takes, whether it was polled, read back on
+        connecting, or pushed by the device. A write's echo does not come this
+        way: it carries one parameter, not the node's state.
+        """
+        self._property.process_property_update(node_id, params)
+        self._discovery.remember_report(node_id, params)
 
-    async def set_property(
-        self,
-        node_id: str,
-        prop_name: str,
-        value: Any,
-    ) -> bool:
-        """Set device property, auto-selecting local or cloud based on device mode."""
-        if self.is_cloud_device(node_id):
-            return await self._set_cloud_property(node_id, prop_name, value)
-        return await self._set_local_property(node_id, prop_name, value)
-
-    def process_property_update(self, node_id: str, params_data: dict) -> None:
-        """Process property update and fire events."""
-        self._property.process_property_update(node_id, params_data)
-
-    # Device Registration & Lifecycle
-
-    def register_config_entry(
-        self, node_id: str, entry_id: str, connection_mode: str = CONNECTION_MODE_LOCAL
+    async def publish_properties(
+        self, node_id: str, properties: list[dict[str, Any]]
     ) -> None:
-        """Register a config entry for a device."""
-        self.registry.register_config_entry(node_id, entry_id)
+        """Publish the params a node's raw properties carry, if they carry any."""
+        _LOGGER.debug("Raw properties for %s: %s", node_id, properties)
+        if params := get_raw_params(properties):
+            await self.publish_params(node_id, params)
+
+    def _active_report_handler(
+        self, node_id: str
+    ) -> Callable[[Any, Any], Awaitable[None]]:
+        """Return the client callback that publishes a node's active reports.
+
+        Query responses are answered by their futures, not here.
+        """
+
+        async def on_device_message(msg_source: Any, data: Any) -> None:
+            if msg_source != local_ctrl.MessageSource.ACTIVE_REPORT:
+                return
+            if isinstance(data, dict) and KEY_PROPERTIES in data:
+                await self.publish_properties(node_id, data[KEY_PROPERTIES])
+            else:
+                _LOGGER.warning(
+                    "Device %s ACTIVE_REPORT invalid format - data: %s", node_id, data
+                )
+
+        return on_device_message
+
+    def get_firmware_version(self, node_id: str) -> str | None:
+        """Return the firmware version the node gave in its config."""
+        device = self.registry.get_device(node_id)
+        return device.firmware_version if device else None
+
+    def set_firmware_version(self, node_id: str, version: str) -> None:
+        """Adopt a firmware version a later config read reported (after an OTA)."""
+        device = self.registry.get_device(node_id)
+        if device is not None:
+            device.firmware_version = version
+
+    async def set_params(self, node_id: str, params: dict[str, Any]) -> WriteOutcome:
+        """Write a ``{device_name: {param: value}}`` payload, local or cloud.
+
+        Returns:
+            How it ended. The cloud client answers only yes or no, so a cloud
+            write is never UNREACHABLE.
+        """
+        if not params:
+            return WriteOutcome.REFUSED
+
+        if self.is_cloud_device(node_id):
+            client = self._get_cloud_client(node_id)
+            if not client:
+                _LOGGER.error("Cloud client not configured for %s", node_id)
+                return WriteOutcome.UNREACHABLE
+            if await client.set_params(node_id, params):
+                return WriteOutcome.ACCEPTED
+            return WriteOutcome.REFUSED
+
+        return await self._property.set_params(node_id, params)
+
+    def set_connection_mode(self, node_id: str, connection_mode: str) -> None:
+        """Record how a node is reached, local control or the cloud."""
         self._device_connection_modes[node_id] = connection_mode
 
     def register_cloud_device(self, node_id: str) -> None:
@@ -258,35 +264,39 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
         *,
         process_properties: bool = True,
     ) -> bool:
-        """Register a device with the API coordinator.
+        """Connect to a device and record it, once however many callers ask.
 
-        Note: Lock is handled internally by connect_and_sync() to avoid
-        deadlock with nested lock acquisition.
-
-        Args:
-            node_id: Device node ID
-            ip: Device IP address
-            port: Device port (defaults to self.default_port)
-            process_properties: If True (default), process properties and
-                              update all entities. Use True for reconnection
-                              scenarios where entities need state sync.
+        `process_properties` syncs entity state on reconnection; initial setup
+        passes False because the coordinator does discovery itself.
         """
         if port is None:
             port = self.default_port
 
         device = self.registry.register_device(node_id, ip, port)
 
-        # Use device lock to avoid race condition between connection check
-        # and state updates (device.registered, device.last_success)
+        # The lock cannot be held across connect_and_sync, which takes it too;
+        # a second caller arriving in the gap waits on the in-flight future.
         async with self.registry.device_lock(node_id):
-            # Check if already connected (under lock to avoid race)
             client = self.registry.get_client(node_id)
             if client and await client.is_connected():
                 device.registered = True
                 device.last_success = asyncio.get_running_loop().time()
                 return True
+            inflight = self._registering.get(node_id)
+            if inflight is None:
+                inflight = asyncio.get_running_loop().create_future()
+                self._registering[node_id] = inflight
+                owner = True
+            else:
+                owner = False
 
-        # connect_and_sync() handles its own locking
+        if not owner:
+            return await inflight
+
+        # Whatever leaves this block, the in-flight future is resolved, or
+        # every later registration of this node would wait on it for good.
+        success = False
+        outcome: BaseException | None = None
         try:
             success, _ = await self._connect_and_sync_device(
                 node_id,
@@ -294,59 +304,85 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
                 port,
                 process_properties=process_properties,
             )
-        except (OSError, TimeoutError, ConnectionError, RuntimeError) as err:
-            async with self.registry.device_lock(node_id):
-                device.registered = False
-            _LOGGER.debug("Failed to register device %s: %s", node_id, err)
+        except BaseException as err:
+            outcome = err
             raise
-
-        # Re-acquire lock for final state updates
-        async with self.registry.device_lock(node_id):
-            if success:
-                device.registered = True
+        finally:
+            # Plain attribute writes; nothing here yields, so no lock is needed.
+            device.registered = bool(success) and outcome is None
+            if device.registered:
                 device.last_success = asyncio.get_running_loop().time()
-                return True
+            if outcome is not None:
+                _LOGGER.debug("Failed to register device %s: %s", node_id, outcome)
+            self._settle_inflight(node_id, inflight, success, outcome)
 
-            device.registered = False
-            return False
+        return bool(success)
+
+    def _settle_inflight(
+        self,
+        node_id: str,
+        inflight: asyncio.Future[bool],
+        success: bool,
+        outcome: BaseException | None,
+    ) -> None:
+        """Hand the owner's result to everyone waiting on the same registration.
+
+        The future may already be cancelled by ``cleanup()``.
+        """
+        if self._registering.get(node_id) is inflight:
+            self._registering.pop(node_id, None)
+        if inflight.done():
+            return
+        if outcome is None:
+            inflight.set_result(bool(success))
+            return
+        if isinstance(outcome, asyncio.CancelledError):
+            inflight.cancel()
+            return
+        if isinstance(outcome, Exception):
+            inflight.set_exception(outcome)
+            # Read it back so that a failure nobody else was waiting on is not
+            # reported by asyncio as an exception that was never retrieved.
+            inflight.exception()
+            return
+        # KeyboardInterrupt and friends: nothing sensible to hand over.
+        inflight.cancel()
 
     async def unregister_device(self, node_id: str) -> None:
         """Unregister and clean up a device."""
         self._device_connection_modes.pop(node_id, None)
         self._cloud_clients.pop(node_id, None)
         await self._connection.disconnect_device(node_id)
-        await self.registry.remove_device(node_id)
+        self.registry.remove_device(node_id)
 
     async def cleanup(self) -> None:
         """Clean up API resources."""
         if self._global_browser:
-            with contextlib.suppress(Exception):
+            # Raises if the browser was already cancelled underneath us.
+            with contextlib.suppress(RuntimeError):
                 self._global_browser.cancel()
             self._global_browser = None
 
-        self._global_listener = None
+        if self._global_listener is not None:
+            self._global_listener.cancel_pending()
+            self._global_listener = None
+        for pending in list(self._registering.values()):
+            if not pending.done():
+                pending.cancel()
+        self._registering.clear()
         self._cloud_clients.clear()
         self._device_connection_modes.clear()
 
         await self._connection.disconnect_all()
 
-    # Service Operations
-
-    async def start_services(self, enable_discovery: bool = True) -> None:
-        """Start API services including mDNS browser.
-
-        This method is idempotent - calling it multiple times is safe.
-        """
-        if not enable_discovery:
-            return
-
-        # Already started, skip
+    async def start_services(self) -> None:
+        """Start browsing mDNS for nodes. Calling it again is a no-op."""
         if self._global_browser is not None:
             return
 
         try:
-            self._global_listener = GlobalMDNSListener(self.hass, api=self)
-            zc: Zeroconf = await zeroconf.async_get_instance(self.hass)
+            self._global_listener = GlobalMDNSListener(self.host, api=self)
+            zc: Zeroconf = await self.host.zeroconf()
             self._global_browser = ServiceBrowser(
                 zc, MDNS_SERVICE_TYPE, self._global_listener
             )
@@ -361,22 +397,32 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
         device = self.registry.get_device(node_id)
         return device.to_dict() if device else None
 
-    async def update_device(
-        self,
-        node_id: str,
-        ip: str,
-        port: int | None = None,
-    ) -> None:
-        """Update device information and attempt connection.
+    async def read_properties(self, node_id: str) -> list[dict[str, Any]] | None:
+        """Read a local node's properties over its open session.
 
-        Args:
-            node_id: Device node ID
-            ip: Device IP address
-            port: Device port (defaults to self.default_port)
+        Returns:
+            What the node answered, or None if it could not be asked; the
+            client then reports ``IotHost.connection_lost``.
         """
-        await self.register_device(node_id, ip, port)
+        client = self.registry.get_client(node_id)
+        if client is None:
+            return None
+        return await client.get_property_values()
 
-    # Internal Connection Methods
+    def get_device(self, node_id: str) -> DeviceInfo | None:
+        """Return what the registry holds about a node, or None if it is unknown."""
+        return self.registry.get_device(node_id)
+
+    def get_reported_config(self, node_id: str) -> tuple[dict, dict]:
+        """Return the node config and params as the device last reported them.
+
+        Returns:
+            A ``(config, params)`` pair, both empty until discovery has run.
+        """
+        device = self.registry.get_device(node_id)
+        if device is None:
+            return {}, {}
+        return device.raw_config, device.raw_params
 
     async def _connect_and_sync_device(
         self,
@@ -386,17 +432,7 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
         *,
         process_properties: bool = True,
     ) -> tuple[bool, list | None]:
-        """Connect to device and sync properties.
-
-        Args:
-            node_id: Device node ID
-            ip: Device IP address
-            port: Device port
-            process_properties: If True, process properties and trigger entity
-                              discovery. If False, only establish connection
-                              without processing (used during initial setup
-                              when Coordinator handles discovery).
-        """
+        """Connect to a device, and on a reconnection also re-read its state."""
         success, properties = await self._connection.connect_and_sync(
             node_id,
             ip,
@@ -404,10 +440,8 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
             process_properties=process_properties,
         )
 
-        # Only trigger discovery when process_properties=True
-        # Initial setup uses process_properties=False because Coordinator
-        # handles discovery. Reconnection uses process_properties=True to
-        # sync entity states
+        # Discovery only belongs to the reconnection path. During initial setup
+        # the coordinator runs it, which is what process_properties=False says.
         if (
             process_properties
             and success
@@ -419,61 +453,36 @@ class ESPWeaverApi:  # pylint: disable=too-many-public-methods
 
         return (success, properties)
 
-    async def _reconnect_and_retry_property(
-        self,
-        node_id: str,
-        prop_name: str,
-        value: Any,
-    ) -> bool:
-        """Reconnect and retry property set operation.
-
-        Syncs all entity states before retrying the property set.
-        """
+    async def _reconnect_and_retry_params(
+        self, node_id: str, params: dict[str, Any]
+    ) -> WriteOutcome:
+        """Reconnect, sync entity states, then run the params write once more."""
         device = self.registry.get_device(node_id)
         if not device or not device.ip:
             _LOGGER.warning(
                 "Cannot reconnect device %s: device info not found", node_id
             )
-            return False
+            return WriteOutcome.UNREACHABLE
 
-        port = device.port or self.default_port
+        label = ", ".join(params)
+        _LOGGER.debug("Reconnecting %s to retry writing %s", node_id, label)
 
-        _LOGGER.debug(
-            "Attempting reconnection and retry for device %s (prop=%s)",
-            node_id,
-            prop_name,
-        )
-
-        # Sync all entities with device state before executing user's command
+        # Sync all entities with device state before executing user's command.
         success, _ = await self._connection.connect_and_sync(
             node_id,
             device.ip,
-            port,
+            device.port or self.default_port,
             process_properties=True,
         )
         if not success:
-            _LOGGER.warning(
-                "Reconnection failed for device %s, cannot retry property set",
-                node_id,
-            )
-            return False
+            _LOGGER.warning("Reconnection failed for %s, cannot retry write", node_id)
+            return WriteOutcome.UNREACHABLE
 
-        _LOGGER.debug("Reconnection successful, retrying property set for %s", node_id)
+        outcome = await self._property.retry_params(node_id, params)
+        if outcome is not WriteOutcome.ACCEPTED:
+            _LOGGER.error("Writing %s to %s failed after reconnection", label, node_id)
+            return outcome
 
-        result = await self._set_local_property(node_id, prop_name, value)
-
-        if result:
-            # Update last_success under device lock to avoid race with register_device
-            async with self.registry.device_lock(node_id):
-                device.last_success = asyncio.get_running_loop().time()
-            _LOGGER.info(
-                "Property '%s' retry successful for device %s", prop_name, node_id
-            )
-        else:
-            _LOGGER.error(
-                "Property '%s' retry failed for device %s after reconnection",
-                prop_name,
-                node_id,
-            )
-
-        return result
+        device.last_success = asyncio.get_running_loop().time()
+        _LOGGER.info("Writing %s to %s succeeded after reconnection", label, node_id)
+        return outcome

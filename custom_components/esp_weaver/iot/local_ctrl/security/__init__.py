@@ -10,6 +10,6 @@ and Security2 (SRP6a + AES-GCM).
 
 from .security0 import Security0
 from .security1 import Security1
-from .security2 import Security2, sec2_gen_salt_verifier
+from .security2 import Security2
 
-__all__ = ["Security0", "Security1", "Security2", "sec2_gen_salt_verifier"]
+__all__ = ["Security0", "Security1", "Security2"]

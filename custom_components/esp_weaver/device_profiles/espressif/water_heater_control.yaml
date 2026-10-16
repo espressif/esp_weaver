@@ -1,0 +1,55 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: water_heater_control
+product_label: "Water heater"
+product_labels:
+  zh-Hans: "热水器"
+model: "*"
+
+devices:
+  # This extended type adds the controls required by Home Assistant's water
+  # heater platform. The official RainMaker water-heater type provides only
+  # read-only temperature data.
+  - type: esp.device.water-heater-control
+    entities:
+      - platform: water_heater
+        name: "Water Heater"
+        key: water_heater
+        # Only Power is required so firmware with fewer controls still creates
+        # an entity; each optional parameter adds its corresponding control.
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+          target_temperature:
+            param: "Setpoint Temperature"
+            type: esp.param.range
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            optional: true
+            # These reference bounds must match the range reported by firmware.
+            bounds: { min: 30, max: 75, step: 1 }
+          # Operation modes come from the firmware's valid value list. Home
+          # Assistant adds an off choice that disables Power; selecting another
+          # mode enables Power and writes that mode.
+          operation_mode:
+            param: "Mode"
+            type: esp.param.mode
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+          current_temperature:
+            param: "Temperature"
+            type: esp.param.temperature
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+            optional: true

@@ -2,233 +2,163 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Property parsing utilities for ESP IoT integration.
+"""Parsing of the properties an ESP device answers local control queries with."""
 
-This module provides utility functions for parsing device properties
-from ESP Local Control protocol responses.
-
-These functions are used by:
-- DeviceDiscoveryManager for initial property extraction
-- DeviceMonitor for active report processing
-- PropertyManager for property updates
-
-Note: If you need both raw_params and by_device_type values, call
-parse_device_properties() directly instead of using both get_raw_params()
-and get_device_states() convenience functions separately. This avoids
-parsing the properties twice.
-"""
-
-from dataclasses import dataclass
 import json
 import logging
 from typing import Any
 
-from ..specs.device_specs import DEVICE_KEY_STATE, DEVICE_TYPE_BINARY_SENSOR
-from ..specs.keys import KEY_CONFIG, KEY_NAME, KEY_PARAMS, KEY_VALUE
+from ..specs.device_specs import CONFIG_PROPERTY_NAMES
+from ..specs.keys import (
+    KEY_FW_VERSION,
+    KEY_INFO,
+    KEY_MODEL,
+    KEY_NAME,
+    KEY_PARAMS,
+    KEY_VALUE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
+# RainMaker's generic model: reference firmware reports it, and it names no
+# particular hardware.
+MODEL_GENERIC_REPORTED = "*"
 
-@dataclass
-class ParsedProperties:
-    """Result of parsing device properties.
 
-    Attributes:
-        raw_params: Raw params data from the first "params" property found.
-                   Used for active reports where we need the original structure.
-        by_device_type: Values organized by device type (Light, Sensor, etc.).
-                       Used for discovery and state sync.
+def decode_property_value(prop_value: object) -> dict | None:
+    """Return one property's value as a mapping (from bytes, str or dict), or None.
+
+    Anything else, None included, is not a value and gives None.
     """
-
-    raw_params: dict[str, Any] | None
-    by_device_type: dict[str, Any]
-
-
-def decode_property_value(prop_value: bytes | str | dict | None) -> dict | None:
-    """Decode property value to dictionary.
-
-    Handles various formats from ESP devices:
-    - bytes (UTF-8 or Latin-1 encoded JSON)
-    - str (JSON string)
-    - dict (already parsed)
-
-    Args:
-        prop_value: Raw property value from device
-
-    Returns:
-        Parsed dictionary or None if parsing fails
-    """
-    if prop_value is None:
-        return None
-
     if isinstance(prop_value, dict):
         return prop_value
 
     if isinstance(prop_value, bytes):
         # ESP devices send UTF-8 encoded JSON
         try:
-            value_str = prop_value.decode("utf-8")
+            text = prop_value.decode("utf-8")
         except UnicodeDecodeError:
             # Latin-1 can decode any byte sequence
-            value_str = prop_value.decode("latin-1")
+            text = prop_value.decode("latin-1")
+    elif isinstance(prop_value, str):
+        text = prop_value
+    else:
+        return None
 
-        value_str = value_str.strip()
-        if not value_str.startswith("{"):
-            return None
+    text = text.strip()
+    if not text.startswith("{"):
+        return None
 
-        try:
-            result = json.loads(value_str)
-        except json.JSONDecodeError:
-            _LOGGER.debug("Failed to parse JSON from bytes property value")
-            return None
-        if not isinstance(result, dict):
-            _LOGGER.debug("JSON parsed to non-dict type: %s", type(result).__name__)
-            return None
-        return result
-
-    if isinstance(prop_value, str):
-        prop_value = prop_value.strip()
-        try:
-            if prop_value.startswith("{"):
-                str_result = json.loads(prop_value)
-                if not isinstance(str_result, dict):
-                    _LOGGER.debug(
-                        "JSON string parsed to non-dict type: %s",
-                        type(str_result).__name__,
-                    )
-                    return None
-                return str_result
-        except json.JSONDecodeError:
-            _LOGGER.debug("Failed to parse JSON string property value")
-            return None
-
-    return None
-
-
-def parse_device_properties(
-    properties: list[dict[str, Any]] | None,
-) -> ParsedProperties:
-    """Parse device properties and extract values.
-
-    This function processes ESP device properties and returns both:
-    1. Raw params data (for active reports)
-    2. Values organized by device type (for discovery/sync)
-
-    Args:
-        properties: List of property dictionaries from device.
-                   Each dict has "name" and "value" keys.
-                   Can be None or empty list.
-
-    Returns:
-        ParsedProperties with:
-        - raw_params: First "params" property value found (or None)
-        - by_device_type: Values organized by device type, e.g.:
-            {
-                "Light": {"Power": True, "Brightness": 100},
-                "Temperature Sensor": {"Temperature": 25.5},
-            }
-
-    Example:
-        >>> result = parse_device_properties(properties)
-        >>> # For active reports:
-        >>> if result.raw_params:
-        ...     process_update(result.raw_params)
-        >>> # For discovery:
-        >>> light_data = result.by_device_type.get("Light", {})
-    """
-    # Handle None or empty input
-    if not properties:
-        return ParsedProperties(raw_params=None, by_device_type={})
-
-    raw_params: dict[str, Any] | None = None
-    by_device_type: dict[str, Any] = {}
-
-    for prop in properties:
-        prop_name = prop.get(KEY_NAME, "")
-
-        # Skip config property (it's device definition, not state)
-        if prop_name == KEY_CONFIG:
-            continue
-
-        prop_value = prop.get(KEY_VALUE)
-        if prop_value is None:
-            continue
-
-        decoded = decode_property_value(prop_value)
-        if not decoded:
-            continue
-
-        # Capture first params property as raw_params (ESP may report without name)
-        if raw_params is None and (not prop_name or prop_name == KEY_PARAMS):
-            raw_params = decoded
-
-        # Organize all data by device type
-        _organize_by_device_type(decoded, by_device_type)
-
-    return ParsedProperties(raw_params=raw_params, by_device_type=by_device_type)
-
-
-def _organize_by_device_type(
-    decoded_data: dict[str, Any],
-    result: dict[str, Any],
-) -> None:
-    """Organize decoded property data by device type.
-
-    Args:
-        decoded_data: Decoded property value dictionary
-        result: Dictionary to populate with organized data
-    """
-    for device_type, device_data in decoded_data.items():
-        # Skip non-dict values (metadata fields)
-        if not isinstance(device_data, dict):
-            # Handle "State" for binary sensors - store under binary sensor namespace
-            if device_type == DEVICE_KEY_STATE:
-                result.setdefault(DEVICE_TYPE_BINARY_SENSOR, {})[DEVICE_KEY_STATE] = (
-                    device_data
-                )
-            continue
-
-        # Store or merge device data
-        if device_type not in result:
-            result[device_type] = device_data
-        else:
-            result[device_type].update(device_data)
-
-
-# Convenience Functions
-
-
-def get_device_states(properties: list[dict[str, Any]] | None) -> dict[str, Any]:
-    """Get device states organized by device type.
-
-    Convenience wrapper for parse_device_properties().by_device_type.
-
-    Args:
-        properties: List of property dictionaries from device.
-                   Can be None or empty list.
-
-    Returns:
-        Dictionary of states by device type, e.g.:
-        {"Light": {"Power": True}, "Temperature Sensor": {"Temperature": 25.5}}
-        Returns empty dict if properties is None or empty.
-    """
-    if not properties:
-        return {}
-    return parse_device_properties(properties).by_device_type
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError:
+        _LOGGER.debug("Failed to parse JSON property value")
+        return None
+    if not isinstance(result, dict):
+        _LOGGER.debug("JSON parsed to non-dict type: %s", type(result).__name__)
+        return None
+    return result
 
 
 def get_raw_params(properties: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    """Get raw params data from properties.
+    """Return the params property as sent, ``{device_name: {param: value}}``.
 
-    Convenience wrapper for parse_device_properties().raw_params.
-
-    Args:
-        properties: List of property dictionaries.
-                   Can be None or empty list.
-
-    Returns:
-        Raw params dict or None if not found or input is empty.
+    An unnamed property counts: firmware may report params without naming it.
     """
     if not properties:
         return None
-    return parse_device_properties(properties).raw_params
+
+    for prop in properties:
+        prop_name = prop.get(KEY_NAME, "")
+        if prop_name and prop_name != KEY_PARAMS:
+            continue
+        decoded = decode_property_value(prop.get(KEY_VALUE))
+        if decoded:
+            return decoded
+    return None
+
+
+def find_config_property(
+    properties: list[dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Return the property carrying the node's object model, undecoded.
+
+    Firmware has called it several things; the names are tried in order.
+    """
+    if not properties:
+        return None
+
+    for config_name in CONFIG_PROPERTY_NAMES:
+        for prop in properties:
+            if prop.get(KEY_NAME) == config_name and isinstance(
+                prop.get(KEY_VALUE), (bytes, str, dict)
+            ):
+                return prop
+    return None
+
+
+def get_raw_config(properties: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Return the node's object model as a plain dict."""
+    config_property = find_config_property(properties)
+    if config_property is None:
+        return None
+    return decode_property_value(config_property.get(KEY_VALUE))
+
+
+def firmware_version_from_config(config: dict[str, Any] | None) -> str | None:
+    """Return the firmware version a node's config names, if it names one.
+
+    Read on its own because it is the one field an OTA changes without the
+    object model changing.
+    """
+    if not config:
+        return None
+
+    info = config.get(KEY_INFO)
+    if not isinstance(info, dict):
+        return None
+
+    version = info.get(KEY_FW_VERSION)
+    return str(version) if version else None
+
+
+def model_from_config(config: dict[str, Any] | None) -> str | None:
+    """Return ``info.model`` from a node's config, if present. No fallback.."""
+    if not config:
+        return None
+
+    info = config.get(KEY_INFO)
+    if not isinstance(info, dict):
+        return None
+
+    model = info.get(KEY_MODEL)
+    return str(model) if model else None
+
+
+def model_id_from_config(
+    config: dict[str, Any] | None, *, identity_advertised: bool
+) -> str | None:
+    """Return the advertised model, except the generic ``"*"``.
+
+    Whether firmware set a model comes from its mDNS record, not from comparing
+    the model with the project name: firmware may deliberately use its project
+    name as its model.
+    """
+    if not config or not identity_advertised:
+        return None
+
+    info = config.get(KEY_INFO)
+    if not isinstance(info, dict):
+        return None
+
+    model = info.get(KEY_MODEL)
+    if not model or model == MODEL_GENERIC_REPORTED:
+        return None
+    return str(model)
+
+
+def firmware_version_from_properties(
+    properties: list[dict[str, Any]] | None,
+) -> str | None:
+    """Return the firmware version a local read's config carries, if any."""
+    return firmware_version_from_config(get_raw_config(properties))

@@ -1,0 +1,25 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: switch
+product_label: "Switch"
+product_labels:
+  zh-Hans: "开关"
+model: "*"
+
+devices:
+  - type: esp.device.switch
+    entities:
+      - platform: switch
+        name: "Switch"
+        key: switch
+        device_class: switch
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]

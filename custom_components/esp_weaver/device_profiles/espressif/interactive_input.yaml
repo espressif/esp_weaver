@@ -1,0 +1,49 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: interactive_input
+product_label: "Interactive input"
+product_labels:
+  zh-Hans: "交互输入"
+model: "*"
+
+devices:
+  # The enum device class restricts Last Event to the reference firmware's
+  # values. Input Config and Input Mapping use RainMaker object parameters
+  # because embedding JSON in strings can prevent parsing of the node's entire
+  # parameter payload.
+  - type: esp.device.interactive-input
+    entities:
+      - platform: sensor
+        name: "Interactive Input"
+        key: interactive_input
+        device_class: enum
+        attributes:
+          state:
+            param: "Last Event"
+            type: esp.param.last_event
+            data_type: string
+            properties: [read]
+            options: ["none", click, double_click, long_press, angle, increment, speed, tap, double_tap, swipe]
+        extra_attributes:
+          input_type:    { param: "Input Type",    type: esp.param.input_type,    properties: [read, write] }
+          input_value:   { param: "Input Value",   type: esp.param.input_value,   properties: [read] }
+          input_events:  { param: "Input Events",  type: esp.param.input_events,  properties: [read] }
+          input_config:  { param: "Input Config",  type: esp.param.input_config,  data_type: object, properties: [read, write] }
+          input_mapping: { param: "Input Mapping", type: esp.param.input_mapping, data_type: object, properties: [read, write] }
+          sensitivity:   { param: "Sensitivity",   type: esp.param.sensitivity,   properties: [read, write] }
+
+      - platform: number
+        name: "Input Sensitivity"
+        key: input_sensitivity
+        entity_category: config
+        attributes:
+          value:
+            param: "Sensitivity"
+            type: esp.param.sensitivity
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 0, max: 100, step: 1 }

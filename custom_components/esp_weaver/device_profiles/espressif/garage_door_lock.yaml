@@ -1,0 +1,29 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: garage_door_lock
+product_label: "Garage door lock"
+product_labels:
+  zh-Hans: "车库门锁"
+model: "*"
+
+devices:
+  # This standalone device uses the same numeric Lock State values as the
+  # RainMaker lock type. If one node also exposes a garage-door lock, the
+  # integration disambiguates their entity keys so both locks are retained.
+  - type: esp.device.garage-door-lock
+    entities:
+      - platform: lock
+        name: "Garage Door Lock"
+        key: garage_door_lock
+        attributes:
+          state:
+            param: "Lock State"
+            type: esp.param.lockstate
+            data_type: int
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+            bounds: { min: 0, max: 2, step: 1 }
+            map: { 0: unlocked, 1: locked, 2: jammed }

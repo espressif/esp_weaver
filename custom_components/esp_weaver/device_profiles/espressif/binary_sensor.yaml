@@ -1,0 +1,70 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: binary_sensor
+product_label: "Binary sensor"
+product_labels:
+  zh-Hans: "二进制传感器"
+model: "*"
+
+devices:
+  # This profile follows the ESP-Weaver binary sensor example firmware. The
+  # entity defaults to a door sensor when firmware omits the optional
+  # device_class parameter; a reported class overrides that default.
+  - type: esp.device.binary-sensor
+    entities:
+      - platform: binary_sensor
+        name: "Binary Sensor"
+        key: binary_sensor
+        device_class: door
+        attributes:
+          state:
+            param: "State"
+            type: esp.param.state
+            data_type: bool
+            properties: [read]
+          # Home Assistant has no touch sensor class, so touch maps to occupancy.
+          # This parameter remains optional because firmware without selectable
+          # subclasses should still create the binary sensor.
+          device_class:
+            param: "device_class"
+            type: esp.param.device_class
+            data_type: string
+            properties: [read, write]
+            optional: true
+            map: { door: door, plug: plug, motion: motion, vibration: vibration, touch: occupancy }
+        extra_attributes:
+          debounce_time:   { param: "debounce_time",   type: esp.param.debounce_time,   properties: [read, write] }
+          report_interval: { param: "report_interval", type: esp.param.report_interval, properties: [read, write] }
+
+      # Debounce time and report interval appear both as editable number entities
+      # and as read-only details on the binary sensor.
+      - platform: number
+        name: "Debounce Time"
+        key: debounce_time
+        device_class: duration
+        entity_category: config
+        unit: "ms"
+        attributes:
+          value:
+            param: "debounce_time"
+            type: esp.param.debounce_time
+            data_type: int
+            properties: [read, write]
+            bounds: { min: 10, max: 1000, step: 10 }
+
+      - platform: number
+        name: "Report Interval"
+        key: report_interval
+        device_class: duration
+        entity_category: config
+        unit: "ms"
+        attributes:
+          value:
+            param: "report_interval"
+            type: esp.param.report_interval
+            data_type: int
+            properties: [read, write]
+            bounds: { min: 100, max: 10000, step: 100 }

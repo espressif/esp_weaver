@@ -1,0 +1,66 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: air_conditioner
+product_label: "Air conditioner"
+product_labels:
+  zh-Hans: "空调"
+model: "*"
+
+devices:
+  # RainMaker defines this device type but provides no helper that creates its
+  # parameters. The official model names the parameter "Fan Speed", unlike the
+  # standalone fan's "Speed"; firmware using another name needs a custom profile.
+  - type: esp.device.air-conditioner
+    entities:
+      - platform: climate
+        name: "Air Conditioner"
+        key: air_conditioner
+        # Applications add every parameter beyond Power. Fixed-speed models may
+        # omit Fan Speed, and models without a room sensor may omit Temperature.
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+          # Home Assistant accepts only fixed HVAC mode names, while RainMaker
+          # leaves AC Mode values model-dependent. This map follows common
+          # RainMaker applications; other values require a custom profile.
+          # "Off" is quoted so YAML does not parse it as false.
+          hvac_mode:
+            param: "AC Mode"
+            type: esp.param.ac-mode
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+            map: { "Off": "off", Cool: cool, Heat: heat, Auto: auto, Dry: dry, Fan: fan_only }
+          current_temperature:
+            param: "Temperature"
+            type: esp.param.temperature
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+            optional: true
+          # Setpoint ranges vary by model. Home Assistant uses bounds reported
+          # by firmware, or its climate defaults when firmware reports none.
+          target_temperature:
+            param: "Setpoint Temperature"
+            type: esp.param.setpoint-temperature
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            optional: true
+          fan_mode:
+            param: "Fan Speed"
+            type: esp.param.speed
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            optional: true
+            bounds: { min: 0, max: 5, step: 1 }
+            map: { 0: "off", 1: low, 2: medium_low, 3: medium, 4: medium_high, 5: high }

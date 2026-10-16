@@ -1,0 +1,50 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: humidifier
+product_label: "Humidifier"
+product_labels:
+  zh-Hans: "加湿器"
+model: "*"
+
+devices:
+  - type: esp.device.humidifier
+    entities:
+      - platform: humidifier
+        name: "Humidifier"
+        key: humidifier
+        device_class: humidifier
+        # Only Power is required so firmware with fewer controls still creates
+        # an entity. Home Assistant offers a mode picker only when the profile
+        # or firmware supplies a list of valid mode names.
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+          target_humidity:
+            param: "Target Humidity"
+            type: esp.param.range
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            optional: true
+            bounds: { min: 0, max: 100, step: 1 }
+          mode:
+            param: "Mode"
+            type: esp.param.mode
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+          current_humidity:
+            param: "Humidity"
+            type: esp.param.range
+            data_type: int
+            ui_type: esp.ui.text
+            properties: [read]
+            optional: true

@@ -1,0 +1,23 @@
+# Services offered by ESP-Weaver.
+#
+# Names and descriptions live in strings.json / translations, not here.
+#
+# reload: optional url, filename, and overwrite. An empty call rescans profiles
+# and reloads all esp_weaver config entries (Developer Tools → Reload all YAML
+# configuration).
+
+reload:
+  fields:
+    url:
+      example: "https://raw.githubusercontent.com/acme/ha-profiles/main/acme_valve.yaml"
+      selector:
+        text:
+          type: url
+    filename:
+      example: "acme_valve.yaml"
+      selector:
+        text:
+    overwrite:
+      default: false
+      selector:
+        boolean:

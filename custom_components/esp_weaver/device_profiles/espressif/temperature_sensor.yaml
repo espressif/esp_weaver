@@ -1,0 +1,31 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: temperature_sensor
+product_label: "Temperature sensor"
+product_labels:
+  zh-Hans: "温度传感器"
+model: "*"
+
+devices:
+  - type: esp.device.temperature-sensor
+    entities:
+      # The parameter type does not identify a unit. This profile follows the
+      # RainMaker convention of degrees Celsius, so firmware must use that unit.
+      - platform: sensor
+        name: "Temperature"
+        key: temperature
+        device_class: temperature
+        state_class: measurement
+        unit: "°C"
+        attributes:
+          state:
+            param: "Temperature"
+            type: esp.param.temperature
+            data_type: float
+            ui_type: esp.ui.text
+            # Firmware may additionally enable cloud time-series storage, which
+            # does not affect Home Assistant read access.
+            properties: [read]

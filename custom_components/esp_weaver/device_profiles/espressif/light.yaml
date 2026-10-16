@@ -1,0 +1,77 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: light
+product_label: "Light"
+product_labels:
+  zh-Hans: "灯"
+model: "*"
+
+devices:
+  - type: esp.device.light
+    entities:
+      - platform: light
+        name: "Light"
+        key: light
+        # Only Power is required so dimmable, RGB, and tunable-white models can
+        # share this profile; optional parameters add the controls each model
+        # supports.
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+          brightness:
+            param: "Brightness"
+            type: esp.param.brightness
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            optional: true
+            bounds: { min: 0, max: 100, step: 1 }
+            # RainMaker uses percentage brightness, while Home Assistant uses
+            # values from 0 through 255.
+            scale: { to: [0, 255] }
+          # When both hue and color temperature are available, Light Mode tells
+          # Home Assistant which controls are active. Turning on in HS or color
+          # temperature mode writes 1 or 2. A firmware value of 0 lets Home
+          # Assistant select from the supported modes.
+          color_mode:
+            param: "Light Mode"
+            type: esp.param.light-mode
+            data_type: int
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true
+            bounds: { min: 0, max: 2, step: 1 }
+            map: { 0: unknown, 1: hs, 2: color_temp }
+          color_temp_kelvin:
+            param: "CCT"
+            type: esp.param.cct
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            optional: true
+            bounds: { min: 2700, max: 6500, step: 100 }
+          hue:
+            param: "Hue"
+            type: esp.param.hue
+            data_type: int
+            ui_type: esp.ui.hue-slider
+            properties: [read, write]
+            optional: true
+            bounds: { min: 0, max: 360, step: 1 }
+          saturation:
+            param: "Saturation"
+            type: esp.param.saturation
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            optional: true
+            bounds: { min: 0, max: 100, step: 1 }
+        extra_attributes:
+          intensity: { param: "Intensity", type: esp.param.intensity, properties: [read, write], bounds: { min: 0, max: 100, step: 1 } }

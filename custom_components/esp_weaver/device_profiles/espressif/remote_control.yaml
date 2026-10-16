@@ -1,0 +1,36 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: remote_control
+product_label: "Remote control"
+product_labels:
+  zh-Hans: "遥控器"
+model: "*"
+
+devices:
+  # This extended type models a Home Assistant activity remote. Its distinct
+  # name avoids conflict with RainMaker's official AV remote type.
+  - type: esp.device.remote-control
+    entities:
+      - platform: remote
+        name: "Remote"
+        key: remote
+        attributes:
+          state:
+            param: "Power"
+            type: esp.param.power
+            data_type: bool
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+          # Activity is optional so a power-only remote still creates an entity.
+          # Vendor-defined activity names come from the firmware, and Home
+          # Assistant shows a picker only when that list is nonempty.
+          current_activity:
+            param: "Activity"
+            type: esp.param.mode
+            data_type: string
+            ui_type: esp.ui.dropdown
+            properties: [read, write]
+            optional: true

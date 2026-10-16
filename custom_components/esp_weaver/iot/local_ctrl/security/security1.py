@@ -45,14 +45,11 @@ class Security1(Security):
     - AES-256-CTR for data encryption
     """
 
-    def __init__(
-        self, pop: str = "", verbose: bool = False, sec_patch_ver: int | None = 0
-    ):
+    def __init__(self, pop: str = "", sec_patch_ver: int | None = 0):
         """Initialize Security1.
 
         Args:
             pop: Proof of possession string.
-            verbose: Enable verbose logging.
             sec_patch_ver: Device's protocomm security1 patch version from the
                 ``esp_local_ctrl/version`` endpoint. ``>= 1`` = separate AES-CTR
                 keystreams for TX/RX (esp_weaver); ``0``/``None`` = single shared
@@ -61,7 +58,6 @@ class Security1(Security):
         # Initialize state of the security1 FSM
         self.session_state = SecurityState.REQUEST1
         self.pop = str_to_bytes(pop)
-        self.verbose = verbose
         # Default to a single shared stream (stock protocomm, e.g. RainMaker)
         # when unknown, since that is the primary target.
         self.sec_patch_ver = 0 if sec_patch_ver is None else sec_patch_ver
@@ -106,23 +102,12 @@ class Security1(Security):
             encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw
         )
 
-    def _print_verbose(self, data: str) -> None:
-        """Print verbose debug output if enabled.
-
-        Args:
-            data: Debug message to print.
-        """
-        # Verbose output disabled for Home Assistant integration
-        # In production, this would log to a debug logger
-        _ = data  # Acknowledge the parameter
-
     def setup0_request(self):
         """Form SessionCmd0 request packet using client public key."""
         setup_req = proto.session_pb2.SessionData()
         setup_req.sec_ver = proto.session_pb2.SecScheme1
         self.__generate_key()
         setup_req.sec1.sc0.client_pubkey = self.client_public_key
-        self._print_verbose(f"Client Public Key:\t0x{self.client_public_key.hex()}")
         return setup_req.SerializeToString().decode("latin-1")
 
     def setup0_response(self, response_data):
@@ -136,21 +121,17 @@ class Security1(Security):
         """
         setup_resp = proto.session_pb2.SessionData()
         setup_resp.ParseFromString(str_to_bytes(response_data))
-        self._print_verbose("Security version:\t" + str(setup_resp.sec_ver))
         if setup_resp.sec_ver != proto.session_pb2.SecScheme1:
             raise RuntimeError("Incorrect security scheme")
 
         self.device_public_key = setup_resp.sec1.sr0.device_pubkey
         # Device random is the initialization vector
         device_random = setup_resp.sec1.sr0.device_random
-        self._print_verbose(f"Device Public Key:\t0x{self.device_public_key.hex()}")
-        self._print_verbose(f"Device Random:\t0x{device_random.hex()}")
 
         # Calculate Curve25519 shared key
         shared_key = self.client_private_key.exchange(
             X25519PublicKey.from_public_bytes(self.device_public_key)
         )
-        self._print_verbose(f"Shared Key:\t0x{shared_key.hex()}")
 
         # If PoP is provided, XOR SHA256 of PoP with the previously
         # calculated Shared Key to form the actual Shared Key
@@ -161,9 +142,6 @@ class Security1(Security):
             digest = h.finalize()
             # XOR with and update Shared Key
             shared_key = xor_bytes(shared_key, digest)
-            self._print_verbose(
-                f"Updated Shared Key (XORed with PoP):\t0x{shared_key.hex()}"
-            )
         if self._separate_streams:
             # esp_weaver: independent TX and RX keystreams, both from device_random.
             cipher_encrypt = Cipher(
@@ -197,7 +175,6 @@ class Security1(Security):
         setup_req.sec1.msg = proto.sec1_pb2.Session_Command1
         # Encrypt device public key and attach to the request packet
         client_verify = self.cipher_encrypt.update(self.device_public_key)
-        self._print_verbose(f"Client Proof:\t0x{client_verify.hex()}")
         setup_req.sec1.sc1.client_verify_data = client_verify
         return setup_req.SerializeToString().decode("latin-1")
 
@@ -216,7 +193,6 @@ class Security1(Security):
         if setup_resp.sec_ver == proto.session_pb2.SecScheme1:
             # Read encrypted device verify string
             device_verify = setup_resp.sec1.sr1.device_verify_data
-            self._print_verbose(f"Device Proof:\t0x{device_verify.hex()}")
             # Separate streams: RX keystream starts at 0, so skip one public-key
             # length to align with the device's encrypt counter. Shared stream:
             # already advanced by cmd1, so no skip.

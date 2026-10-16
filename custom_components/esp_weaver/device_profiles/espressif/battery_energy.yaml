@@ -1,0 +1,47 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: battery_energy
+product_label: "Battery and energy"
+product_labels:
+  zh-Hans: "电池与能耗"
+model: "*"
+
+devices:
+  # This profile follows the ESP-Weaver battery example firmware, including
+  # its 3.0–4.2 V range for a single cell. Display-only details omit bounds
+  # because Home Assistant does not use them for validation or control.
+  - type: esp.device.battery-energy
+    entities:
+      - platform: sensor
+        name: "Battery"
+        key: battery_energy
+        device_class: battery
+        state_class: measurement
+        unit: "%"
+        attributes:
+          state:
+            param: "Battery Level"
+            type: esp.param.battery_level
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read]
+        # The allowed charging and alert states come from the example firmware.
+        extra_attributes:
+          voltage:         { param: "Voltage",         type: esp.param.voltage,         properties: [read] }
+          temperature:     { param: "Temperature",     type: esp.param.temperature,     properties: [read] }
+          charging_status: { param: "Charging Status", type: esp.param.charging_status, properties: [read], options: [charging, discharging] }
+          alert_level:     { param: "Alert Level",     type: esp.param.alert_level,     properties: [read], options: [normal, low, critical] }
+        # Alerts follow Alert Level rather than a separate low-battery threshold.
+        # A normal value clears the alert even though normal is not an alert level.
+        alert:
+          attribute: alert_level
+          levels:
+            critical:
+              title: "{device} - Critical Battery"
+              message: "Battery critical: {state}% - Charge immediately!"
+            low:
+              title: "{device} - Low Battery"
+              message: "Battery low: {state}% - Please charge soon."

@@ -1,0 +1,40 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: garage_door
+product_label: "Garage door"
+product_labels:
+  zh-Hans: "车库门"
+model: "*"
+
+devices:
+  # Garage Position and Lock State create independent cover and lock entities,
+  # so firmware may expose either feature without implementing the other.
+  - type: esp.device.garage-door
+    entities:
+      - platform: cover
+        name: "Garage Door"
+        key: garage_door
+        device_class: garage
+        attributes:
+          position:
+            param: "Garage Position"
+            type: esp.param.garage-position
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 0, max: 100, step: 1 }
+      - platform: lock
+        name: "Garage Door Lock"
+        key: garage_door_lock
+        attributes:
+          state:
+            param: "Lock State"
+            type: esp.param.lockstate
+            data_type: int
+            ui_type: esp.ui.toggle
+            properties: [read, write]
+            bounds: { min: 0, max: 2, step: 1 }
+            map: { 0: unlocked, 1: locked, 2: jammed }

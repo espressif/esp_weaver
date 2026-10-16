@@ -1,0 +1,129 @@
+version: 1
+vendor: espressif
+vendor_label: "Espressif"
+vendor_labels:
+  zh-Hans: "乐鑫"
+product: humidity_sensor
+product_label: "Temperature and humidity sensor"
+product_labels:
+  zh-Hans: "温湿度传感器"
+model: "*"
+
+devices:
+  # This profile uses the temperature and humidity parameters from the
+  # ESP-Weaver example sensor firmware so a smaller environmental sensor does
+  # not need to report the example's other measurements.
+  - type: esp.device.humidity-sensor
+    entities:
+      - platform: sensor
+        name: "Humidity"
+        key: humidity
+        device_class: humidity
+        state_class: measurement
+        unit: "%"
+        display_precision: 1
+        attributes:
+          state:
+            param: "Humidity"
+            type: esp.param.humidity
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+
+      - platform: sensor
+        name: "Temperature"
+        key: temperature
+        device_class: temperature
+        state_class: measurement
+        unit: "°C"
+        display_precision: 1
+        attributes:
+          state:
+            param: "Temperature"
+            type: esp.param.temperature
+            data_type: float
+            ui_type: esp.ui.text
+            properties: [read]
+
+      - platform: number
+        name: "Humidity Min Threshold"
+        key: humidity_min_threshold
+        threshold: { of: humidity, end: min }
+        icon: mdi:water-minus
+        device_class: humidity
+        entity_category: config
+        unit: "%"
+        attributes:
+          value:
+            param: "humidity_min_threshold"
+            type: esp.param.config.humidity_min_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 0.0, max: 60.0, step: 1.0 }
+
+      - platform: number
+        name: "Humidity Max Threshold"
+        key: humidity_max_threshold
+        threshold: { of: humidity, end: max }
+        icon: mdi:water-plus
+        device_class: humidity
+        entity_category: config
+        unit: "%"
+        attributes:
+          value:
+            param: "humidity_max_threshold"
+            type: esp.param.config.humidity_max_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 40.0, max: 100.0, step: 1.0 }
+
+      - platform: number
+        name: "Temperature Min Threshold"
+        key: temperature_min_threshold
+        threshold: { of: temperature, end: min }
+        icon: mdi:thermometer-minus
+        device_class: temperature
+        entity_category: config
+        unit: "°C"
+        attributes:
+          value:
+            param: "temp_min_threshold"
+            type: esp.param.config.temp_min_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: -20.0, max: 40.0, step: 0.5 }
+
+      - platform: number
+        name: "Temperature Max Threshold"
+        key: temperature_max_threshold
+        threshold: { of: temperature, end: max }
+        icon: mdi:thermometer-plus
+        device_class: temperature
+        entity_category: config
+        unit: "°C"
+        attributes:
+          value:
+            param: "temp_max_threshold"
+            type: esp.param.config.temp_max_threshold
+            data_type: float
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: -10.0, max: 60.0, step: 0.5 }
+
+      - platform: number
+        name: "Update Interval"
+        key: update_interval
+        device_class: duration
+        entity_category: config
+        unit: "s"
+        attributes:
+          value:
+            param: "update_interval"
+            type: esp.param.config.update_interval
+            data_type: int
+            ui_type: esp.ui.slider
+            properties: [read, write]
+            bounds: { min: 10, max: 300, step: 10 }
